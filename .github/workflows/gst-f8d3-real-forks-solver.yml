@@ -74,7 +74,7 @@ jobs:
           m["require"]["laravel/framework"]="^12.69.2"
           m["require"]["fleetbase/core-api"]="dev-compat/p0-f8d3-laravel12-foundation#ca58d8969ce55988ea76090d803676c98f2c844c as 1.6.74"
           m["require"]["fleetbase/storefront-api"]="dev-compat/p0-f8d3-laravel12-foundation#5e5d0f06102005442db37d817396533df2db8300 as 0.4.31"
-          m["require"]["fleetbase/fleetops-api"]="dev-compat/p0-f8d3-laravel12-barcode#12608a231e836c364550e7327cca2fa604e89c62 as 0.6.75"
+          m["require"]["fleetbase/fleetops-api"]="dev-compat/p0-f8d3-laravel12-barcode#bd0d73a662b73c7ae48ebbf39bf5ba0760cdef04 as 0.6.75"
           if m["require-dev"].get("nunomaduro/collision")!="^7.0":
               raise SystemExit("STOP=COLLISION_EXPECTED_7")
           if m["require-dev"].get("phpunit/phpunit")!="^10.0":
@@ -99,6 +99,36 @@ jobs:
           # Lock validation is deferred until after the ephemeral Composer update:
           # this manifest intentionally differs from the still-pinned Laravel 10 lock.
           composer validate --no-check-lock --no-check-publish
+
+      - name: Test GitHub VCS metadata access in read-only mode without printing tokens
+        env:
+          GH_JOB_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          while read -r repo revision; do
+            [ -n "$repo" ] || continue
+            uri="https://api.github.com/repos/$repo/commits/$revision"
+            status_auth=$(curl -sS --max-time 20 -o /dev/null -w "%{http_code}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $GH_JOB_TOKEN" "$uri")
+            status_public=$(curl -sS --max-time 20 -o /dev/null -w "%{http_code}" \
+              -H "Accept: application/vnd.github+json" "$uri")
+            echo "GITHUB_PUBLIC_REPO_STATUS=$repo auth:$status_auth anonymous:$status_public"
+            if [ "$status_auth" != 200 ] && [ "$status_public" != 200 ]; then
+              echo "STOP=GITHUB_METADATA_UNREADABLE"
+              exit 2
+            fi
+          done <<'REVISIONS'
+          gsentsas/core-api ca58d8969ce55988ea76090d803676c98f2c844c
+          gsentsas/storefront 5e5d0f06102005442db37d817396533df2db8300
+          gsentsas/fleetops bd0d73a662b73c7ae48ebbf39bf5ba0760cdef04
+          geocoder-php/GeocoderLaravel 13.2.2
+          REVISIONS
+          rate=$(curl -sS --max-time 20 -H "Authorization: Bearer $GH_JOB_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            https://api.github.com/rate_limit | \
+            php -r '$x=json_decode(stream_get_contents(STDIN),true); echo is_array($x) ? ($x["resources"]["core"]["remaining"] ?? "UNKNOWN") : "UNAVAILABLE";')
+          echo "GITHUB_TOKEN_CORE_REMAINING=$rate"
 
       - name: Attempt full Composer resolution on disposable runner WITHOUT security waivers
         id: solve
@@ -132,7 +162,7 @@ jobs:
           pins={
               "fleetbase/core-api":("https://github.com/gsentsas/core-api.git","ca58d8969ce55988ea76090d803676c98f2c844c"),
               "fleetbase/storefront-api":("https://github.com/gsentsas/storefront.git","5e5d0f06102005442db37d817396533df2db8300"),
-              "fleetbase/fleetops-api":("https://github.com/gsentsas/fleetops.git","12608a231e836c364550e7327cca2fa604e89c62"),
+              "fleetbase/fleetops-api":("https://github.com/gsentsas/fleetops.git","bd0d73a662b73c7ae48ebbf39bf5ba0760cdef04"),
           }
           for name,(url,sha) in pins.items():
               entry=packages.get(name)
