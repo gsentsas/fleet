@@ -1,0 +1,116 @@
+name: GST P0-F8D2 Laravel 12 compatibility solver (NO GO)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/gst-f8d2-laravel12-solver.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-solver:
+    name: PHP 8.2 Laravel 12.69.2 dependency diagnostic only
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: api
+    env:
+      COMPOSER_NO_INTERACTION: "1"
+      COMPOSER_PROCESS_TIMEOUT: "600"
+    steps:
+      - name: Checkout unmodified fleetbase baseline
+        uses: actions/checkout@v4
+
+      - name: Set up PHP 8.2 and Composer
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, xml, zip, intl, gd, pdo_mysql, bcmath, gmp
+          coverage: none
+
+      - name: Configure read-only Composer GitHub API auth
+        env:
+          GH_API_TOKEN: ${{ github.token }}
+        run: composer config --global github-oauth.github.com "$GH_API_TOKEN"
+
+      - name: Check pinned original manifest and lock
+        run: |
+          php -r '
+            $m = json_decode(file_get_contents("composer.json"), true, 512, JSON_THROW_ON_ERROR);
+            $lock = json_decode(file_get_contents("composer.lock"), true, 512, JSON_THROW_ON_ERROR);
+            if (($m["require"]["laravel/framework"] ?? null) !== "^10.0") { exit(2); }
+            if (($m["require"]["fleetbase/core-api"] ?? null) !== "^1.6.74") { exit(2); }
+            $p = array_values(array_filter($lock["packages"] ?? [], static fn($p) => ($p["name"] ?? "") === "laravel/framework"));
+            if (count($p) !== 1 || ($p[0]["source"]["reference"] ?? "") !== "74e222cee687f957d95aaadddae69270e3205cf7") { exit(2); }
+            echo "PINNED_GST_BASELINE=PASS\n";
+          '
+          composer validate --no-check-publish
+
+      - name: Inspect ALL baseline Laravel 12 compatibility blockers without changing files
+        run: |
+          set +e
+          composer prohibits laravel/framework 12.69.2 --locked --tree > "$RUNNER_TEMP/f8d2-locked-prohibits.txt" 2>&1
+          rc=$?
+          set -e
+          echo "BASELINE_PROHIBITS_COMMAND_RC=$rc"
+          sed -n '1,180p' "$RUNNER_TEMP/f8d2-locked-prohibits.txt"
+          test -s "$RUNNER_TEMP/f8d2-locked-prohibits.txt"
+
+      - name: Change ONLY ephemeral manifest to require Laravel 12.69.2 or newer
+        run: |
+          composer require 'laravel/framework:^12.69.2' --no-update --no-plugins --no-scripts --no-interaction --no-progress
+          php -r '
+            $m=json_decode(file_get_contents("composer.json"),true,512,JSON_THROW_ON_ERROR);
+            if(($m["require"]["laravel/framework"]??null)!=="^12.69.2") { fwrite(STDERR,"STOP=EPHEMERAL_TARGET_WRONG\n");exit(2); }
+            echo "EPHEMERAL_LARAVEL_TARGET=12.69.2\n";
+          '
+
+      - name: Resolve Laravel 12 in disposable runner without installing or modifying the lock
+        run: |
+          set +e
+          composer update laravel/framework --with-all-dependencies --dry-run --no-plugins --no-scripts --no-progress --no-interaction --prefer-dist > "$RUNNER_TEMP/f8d2-laravel12-solver.txt" 2>&1
+          rc=$?
+          set -e
+          echo "LARAVEL12_SOLVER_RC=$rc"
+          sed -n '1,220p' "$RUNNER_TEMP/f8d2-laravel12-solver.txt"
+          if [ "$rc" -ne 0 ]; then
+            echo "LARAVEL12_SOLVER=BLOCKED_NO_GO"
+            exit "$rc"
+          fi
+          echo "LARAVEL12_SOLVER=RESOLVED_DIAGNOSTIC_ONLY_NO_GO"
+
+      - name: Upload diagnostics without publishing any deployable lock
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: gst-f8d2-laravel12-solver-logs-not-for-deployment
+          path: |
+            ${{ runner.temp }}/f8d2-locked-prohibits.txt
+            ${{ runner.temp }}/f8d2-laravel12-solver.txt
+          if-no-files-found: warn
+          retention-days: 7
+
+  baseline-security-audit:
+    name: Baseline Composer audit (MUST remain blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: api
+    env:
+      COMPOSER_NO_AUDIT: '0'
+    steps:
+      - name: Checkout original (not modified) dependency lock
+        uses: actions/checkout@v4
+
+      - name: Set up PHP 8.2 and Composer
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          coverage: none
+
+      - name: Audit original lock without advisory exceptions
+        run: composer audit --locked --format=summary
