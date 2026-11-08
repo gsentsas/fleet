@@ -1,0 +1,102 @@
+name: GST FleetOps Composer pin proof (NO GO)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'api/composer.json'
+      - '.github/workflows/gst-fleetops-composer-pin-proof.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    name: Resolve GST fork in ephemeral Composer lock
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: api
+    env:
+      COMPOSER_NO_INTERACTION: "1"
+      COMPOSER_PROCESS_TIMEOUT: "0"
+    steps:
+      - name: Checkout candidate integration
+        uses: actions/checkout@v4
+
+      - name: PHP 8.2 and Composer
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          extensions: mbstring, xml, zip, pdo_mysql, intl, bcmath, gmp
+          coverage: none
+
+      - name: Configure public GitHub source API auth
+        env:
+          GH_API_TOKEN: ${{ github.token }}
+        run: composer config --global github-oauth.github.com "$GH_API_TOKEN"
+
+      - name: Allow one legacy advisory only for isolated dependency resolution
+        run: |
+          # Never write this to api/composer.json or into a deployable artifact.
+          # The separate dependency audit must remain RED while vulnerable.
+          composer config --global --json policy.advisories.ignore-id '{"PKSA-zwc5-qtrz-zm1n":{"on-audit":false,"reason":"Temporary source pin proof only. NEVER permit production deployment; audit must fail if vulnerable."}}'
+
+      - name: Resolve ONLY FleetOps dependency against the pinned fork
+        run: |
+          composer update fleetbase/fleetops-api --with-all-dependencies --minimal-changes --no-plugins --no-scripts --no-progress --no-interaction --prefer-dist
+
+      - name: Verify the exact FleetOps source and immutable commit
+        run: |
+          php -r '
+            $lock = json_decode(file_get_contents("composer.lock"), true, 512, JSON_THROW_ON_ERROR);
+            $packages = array_values(array_filter($lock["packages"] ?? [], static fn($p) => ($p["name"] ?? "") === "fleetbase/fleetops-api"));
+            if (count($packages) !== 1) { fwrite(STDERR, "STOP=FLEETOPS_PACKAGE_CARDINALITY\n"); exit(2); }
+            $package = $packages[0];
+            if (($package["source"]["url"] ?? "") !== "https://github.com/gsentsas/fleetops.git") { fwrite(STDERR, "STOP=UNEXPECTED_VCS_SOURCE\n"); exit(2); }
+            if (($package["source"]["reference"] ?? "") !== "b1f43dec2934ba83225c940f1442bd4d886b0f32") { fwrite(STDERR, "STOP=UNEXPECTED_FLEETOPS_SHA\n"); exit(2); }
+            echo "FLEETOPS_VCS_SOURCE=PASS_GST_FORK\n";
+            echo "FLEETOPS_LOCK_REF=PASS_EXACT_SHA\n";
+          '
+
+      - name: Check Composer lock consistency without scripts
+        run: composer validate --no-check-publish
+
+      - name: Capture generated Composer lock as a NON-DEPLOYABLE artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gst-f8c-composer-pin-candidate-not-for-deployment
+          path: api/composer.lock
+          if-no-files-found: error
+          retention-days: 7
+
+  security-audit:
+    name: Dependency audit (must fail if vulnerable)
+    needs: resolve
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - name: Checkout candidate integration
+        uses: actions/checkout@v4
+
+      - name: PHP 8.2 and Composer
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          coverage: none
+
+      - name: Download exact candidate lock (fails if not produced)
+        uses: actions/download-artifact@v4
+        with:
+          name: gst-f8c-composer-pin-candidate-not-for-deployment
+          path: api
+
+      - name: Audit without any exceptions
+        env:
+          COMPOSER_NO_AUDIT: "0"
+        run: composer audit --locked --format=summary
