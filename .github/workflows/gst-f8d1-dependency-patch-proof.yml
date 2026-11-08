@@ -1,0 +1,180 @@
+name: GST P0-F8D1 targeted dependency security patches (NO GO)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/gst-f8d1-dependency-patch-proof.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  patch-proof:
+    name: Resolve PhpSpreadsheet + Symfony security patches only
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: api
+    env:
+      COMPOSER_NO_INTERACTION: "1"
+      COMPOSER_PROCESS_TIMEOUT: "0"
+    steps:
+      - name: Checkout baseline from pull request
+        uses: actions/checkout@v4
+
+      - name: Setup PHP 8.2 and Composer (same as API target)
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          extensions: mbstring, xml, zip, intl, gd, pdo_mysql, bcmath, gmp
+          coverage: none
+
+      - name: Configure read-only GitHub Composer source access
+        env:
+          GH_API_TOKEN: ${{ github.token }}
+        run: composer config --global github-oauth.github.com "$GH_API_TOKEN"
+
+      - name: Resolve past ONLY the known Laravel 10 advisories in ephemeral runner
+        run: |
+          # Never place this rule in the product composer.json or Docker image.
+          # The independent security audit job has ZERO exceptions.
+          composer config --global --json policy.advisories.ignore-id '{"PKSA-b41t-wbzk-9q51":{"on-audit":false,"reason":"Temporary security patch resolution diagnostic only; Laravel 10 remains blocked for release."},"PKSA-d5tc-s1qs-h781":{"on-audit":false,"reason":"Temporary security patch resolution diagnostic only; Laravel 10 remains blocked for release."},"PKSA-3r5d-mb8f-1qw9":{"on-audit":false,"reason":"Temporary security patch resolution diagnostic only; Laravel 10 remains blocked for release."},"PKSA-m5cs-t1y6-qpcs":{"on-audit":false,"reason":"Temporary security patch resolution diagnostic only; Laravel 10 remains blocked for release."},"PKSA-mdq4-51ck-6kdq":{"on-audit":false,"reason":"Temporary security patch resolution diagnostic only; Laravel 10 remains blocked for release."},"PKSA-8qx3-n5y5-vvnd":{"on-audit":false,"reason":"Temporary security patch resolution diagnostic only; Laravel 10 remains blocked for release."},"PKSA-w7xr-vk7n-rstm":{"on-audit":false,"reason":"Temporary security patch resolution diagnostic only; Laravel 10 remains blocked for release."},"PKSA-zwc5-qtrz-zm1n":{"on-audit":false,"reason":"Temporary security patch resolution diagnostic only; Laravel 10 remains blocked for release."}}'
+
+      - name: Pin baseline lock snapshot
+        run: |
+          test -s composer.lock
+          cp composer.lock "$RUNNER_TEMP/gst-baseline-composer.lock"
+
+      - name: Update ONLY the nine vulnerable Symfony components and PhpSpreadsheet
+        run: |
+          composer update \
+            phpoffice/phpspreadsheet \
+            symfony/filesystem \
+            symfony/http-client \
+            symfony/http-foundation \
+            symfony/http-kernel \
+            symfony/mime \
+            symfony/routing \
+            symfony/serializer \
+            symfony/yaml \
+            --minimal-changes --no-install --no-scripts --no-plugins \
+            --no-progress --no-interaction --prefer-dist
+
+      - name: Validate the nine patched packages and forbid all other drift
+        run: |
+          php <<'PHP'
+          <?php
+          declare(strict_types=1);
+          if (!defined('STDERR')) { define('STDERR', fopen('php://stderr', 'w')); }
+          $before = json_decode(file_get_contents(getenv("RUNNER_TEMP")."/gst-baseline-composer.lock"), true, 512, JSON_THROW_ON_ERROR);
+          $after  = json_decode(file_get_contents("composer.lock"), true, 512, JSON_THROW_ON_ERROR);
+          $targets = [
+            "phpoffice/phpspreadsheet" => true,
+            "symfony/filesystem" => true,
+            "symfony/http-client" => true,
+            "symfony/http-foundation" => true,
+            "symfony/http-kernel" => true,
+            "symfony/mime" => true,
+            "symfony/routing" => true,
+            "symfony/serializer" => true,
+            "symfony/yaml" => true
+          ];
+          $changed = [];
+          $snap = static fn(array $pkg): array => [
+            $pkg["version"] ?? null,
+            $pkg["source"]["url"] ?? null,
+            $pkg["source"]["reference"] ?? null,
+            $pkg["dist"]["url"] ?? null,
+            $pkg["dist"]["reference"] ?? null
+          ];
+          foreach (["packages", "packages-dev"] as $section) {
+            $old = array_column($before[$section] ?? [], null, "name");
+            $new = array_column($after[$section] ?? [], null, "name");
+            if (array_keys($old) !== array_keys($new)) {
+              fwrite(STDERR, "STOP=PACKAGE_SET_OR_ORDER_CHANGED\n"); exit(2);
+            }
+            foreach ($old as $name => $pkg) {
+              if ($snap($pkg) === $snap($new[$name])) { continue; }
+              if (!isset($targets[$name])) {
+                fwrite(STDERR, "STOP=UNRELATED_PACKAGE_CHANGED:".$name."\n"); exit(2);
+              }
+              $changed[$name] = $new[$name]["version"] ?? "unknown";
+            }
+          }
+          if (!$changed) { fwrite(STDERR, "STOP=NO_SECURITY_PATCHES_RESOLVED\n"); exit(2); }
+          $all = array_column(array_merge($after["packages"] ?? [], $after["packages-dev"] ?? []), null, "name");
+          foreach ($targets as $name => $_) {
+            if (!isset($all[$name])) { fwrite(STDERR, "STOP=TARGET_MISSING:".$name."\n"); exit(2); }
+            $oldVersion = ltrim((string) ($all[$name]["version"] ?? ""), "v");
+            if ($name === "phpoffice/phpspreadsheet") {
+              if (version_compare($oldVersion, "1.30.7", "<") || version_compare($oldVersion, "2.0.0", ">=")) {
+                fwrite(STDERR, "STOP=PHPSPREADSHEET_NOT_PATCHED\n"); exit(2);
+              }
+              continue;
+            }
+            $baseline = array_column(array_merge($before["packages"] ?? [], $before["packages-dev"] ?? []), null, "name");
+            $baseVersion = ltrim((string) ($baseline[$name]["version"] ?? ""), "v");
+            if (str_starts_with($baseVersion, "6.4.")) {
+              // Symfony Mime fixed CVE-2026-45070 in 6.4.49 (confirmed by upstream).
+              $min = $name === "symfony/mime" ? "6.4.49" : "6.4.50";
+              if (!str_starts_with($oldVersion,"6.4.")) { fwrite(STDERR,"STOP=SYMFONY_SERIES_CHANGED\n"); exit(2); }
+            } elseif (str_starts_with($baseVersion, "7.4.")) {
+              $min = "7.4.23";
+              if (!str_starts_with($oldVersion,"7.4.")) { fwrite(STDERR,"STOP=SYMFONY_SERIES_CHANGED\n"); exit(2); }
+            } else {
+              fwrite(STDERR, "STOP=UNRECOGNIZED_SYMFONY_BASELINE\n"); exit(2);
+            }
+            if (version_compare($oldVersion, $min, "<")) {
+              fwrite(STDERR, "STOP=SYMFONY_SECURITY_PATCH_MISSING:".$name."\n"); exit(2);
+            }
+          }
+          echo "PATCH_SOURCE_LOCK_GUARD=PASS_TARGETS_ONLY\n";
+          echo "PHPSPREADSHEET_SECURITY_RELEASE=PASS_1_30_7_OR_LATER\n";
+          echo "SYMFONY_SECURITY_RELEASES=PASS_PATCHED_SERIES\n";
+          echo "MODIFIED_PACKAGE_COUNT=".count($changed)."\n";
+          foreach($changed as $name => $version) echo "PATCHED_PACKAGE=".$name."@".$version."\n";
+          PHP
+
+      - name: Validate candidate lock format
+        run: composer validate --no-check-publish
+
+      - name: Upload patch candidate as NOT-FOR-DEPLOYMENT
+        uses: actions/upload-artifact@v4
+        with:
+          name: gst-f8d1-patched-lock-not-for-deployment
+          path: api/composer.lock
+          retention-days: 7
+          if-no-files-found: error
+
+  dependency-audit:
+    name: Unmodified Composer security audit (RELEASE GATE)
+    needs: patch-proof
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: api
+    env:
+      COMPOSER_NO_AUDIT: "0"
+      COMPOSER_NO_INTERACTION: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install PHP 8.2 and Composer
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          coverage: none
+
+      - name: Download exact candidate lock (failure if unavailable)
+        uses: actions/download-artifact@v4
+        with:
+          name: gst-f8d1-patched-lock-not-for-deployment
+          path: api
+
+      - name: Audit exact lock without any exceptions
+        run: composer audit --locked --format=plain
