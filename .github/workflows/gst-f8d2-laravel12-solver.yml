@@ -1,0 +1,334 @@
+name: GST P0-F8D2 Laravel 12 compatibility solver (NO GO)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/gst-f8d2-laravel12-solver.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-solver:
+    name: PHP 8.2 Laravel 12.69.2 dependency diagnostic only
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: api
+    env:
+      COMPOSER_NO_INTERACTION: "1"
+      COMPOSER_PROCESS_TIMEOUT: "600"
+    steps:
+      - name: Checkout unmodified fleetbase baseline
+        uses: actions/checkout@v4
+
+      - name: Set up PHP 8.2 and Composer
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, xml, zip, intl, gd, pdo_mysql, bcmath, gmp
+          coverage: none
+
+      - name: Configure read-only Composer GitHub API auth
+        env:
+          GH_API_TOKEN: ${{ github.token }}
+        run: composer config --global github-oauth.github.com "$GH_API_TOKEN"
+
+      - name: Check pinned original manifest and lock
+        run: |
+          php -r '
+            $m = json_decode(file_get_contents("composer.json"), true, 512, JSON_THROW_ON_ERROR);
+            $lock = json_decode(file_get_contents("composer.lock"), true, 512, JSON_THROW_ON_ERROR);
+            if (($m["require"]["laravel/framework"] ?? null) !== "^10.0") { exit(2); }
+            if (($m["require"]["fleetbase/core-api"] ?? null) !== "^1.6.74") { exit(2); }
+            $p = array_values(array_filter($lock["packages"] ?? [], static fn($p) => ($p["name"] ?? "") === "laravel/framework"));
+            if (count($p) !== 1 || ($p[0]["source"]["reference"] ?? "") !== "74e222cee687f957d95aaadddae69270e3205cf7") { exit(2); }
+            echo "PINNED_GST_BASELINE=PASS\n";
+          '
+          composer validate --no-check-publish
+
+      - name: Inspect ALL baseline Laravel 12 compatibility blockers without changing files
+        run: |
+          set +e
+          composer prohibits laravel/framework 12.69.2 --locked --tree > "$RUNNER_TEMP/f8d2-locked-prohibits.txt" 2>&1
+          rc=$?
+          set -e
+          echo "BASELINE_PROHIBITS_COMMAND_RC=$rc"
+          sed -n '1,180p' "$RUNNER_TEMP/f8d2-locked-prohibits.txt"
+          test -s "$RUNNER_TEMP/f8d2-locked-prohibits.txt"
+
+      - name: Change ONLY ephemeral manifest to require Laravel 12.69.2 or newer
+        run: |
+          composer require 'laravel/framework:^12.69.2' --no-update --no-plugins --no-scripts --no-interaction --no-progress
+          php -r '
+            $m=json_decode(file_get_contents("composer.json"),true,512,JSON_THROW_ON_ERROR);
+            if(($m["require"]["laravel/framework"]??null)!=="^12.69.2") { fwrite(STDERR,"STOP=EPHEMERAL_TARGET_WRONG\n");exit(2); }
+            echo "EPHEMERAL_LARAVEL_TARGET=12.69.2\n";
+          '
+
+      - name: Resolve Laravel 12 in disposable runner without installing or modifying the lock
+        run: |
+          set +e
+          composer update laravel/framework --with-all-dependencies --dry-run --no-plugins --no-scripts --no-progress --no-interaction --prefer-dist > "$RUNNER_TEMP/f8d2-laravel12-solver.txt" 2>&1
+          rc=$?
+          set -e
+          echo "LARAVEL12_SOLVER_RC=$rc"
+          sed -n '1,220p' "$RUNNER_TEMP/f8d2-laravel12-solver.txt"
+          if [ "$rc" -ne 0 ]; then
+            echo "LARAVEL12_SOLVER=BLOCKED_EXPECTED_NO_GO"
+          else
+            echo "LARAVEL12_SOLVER=RESOLVED_UNTESTED_NO_GO"
+          fi
+
+
+      - name: Create hypothetical Core API metadata compatible with Countries 0.9 and Illuminate 12
+        run: |
+          # Composer metadata ONLY: no Core API code or validation tests are modified.
+          # This is a counterfactual compatibility probe, NOT an actual library upgrade.
+          python3 <<'PY'
+          import copy, json, os
+          from pathlib import Path
+
+          lock = json.loads(Path("composer.lock").read_text())
+          pkgs = [p for p in lock["packages"] if p["name"] == "fleetbase/core-api"]
+          if len(pkgs) != 1 or pkgs[0]["version"] != "1.6.74":
+              raise SystemExit("STOP=UNEXPECTED_CORE_API_PACKAGE")
+          core = copy.deepcopy(pkgs[0])
+          requirements = copy.deepcopy(core["require"])
+          if requirements.get("fleetbase/countries") != "^0.8.3":
+              raise SystemExit("STOP=UNEXPECTED_COUNTRIES_CONSTRAINT")
+          keys = (
+              "illuminate/broadcasting",
+              "illuminate/contracts",
+              "illuminate/database",
+              "illuminate/http",
+              "illuminate/notifications",
+              "illuminate/routing",
+              "illuminate/support",
+          )
+          for key in keys:
+              if requirements.get(key) != "^9.0|^10.0":
+                  raise SystemExit("STOP=UNEXPECTED_CORE_ILLUMINATE_CONSTRAINT:" + key)
+              requirements[key] = "^12.0"
+          requirements["fleetbase/countries"] = "^0.9.0"
+          candidate = {
+              "name": "fleetbase/core-api",
+              "version": "1.6.74",
+              "type": "library",
+              "description": "METADATA-ONLY CI PROBE: NOT A DEPLOYABLE CORE API",
+              "require": requirements,
+          }
+          temp = Path(os.environ["RUNNER_TEMP"]) / "gst-f8d2-core-hypothetical"
+          temp.mkdir(parents=True, exist_ok=True)
+          (temp / "composer.json").write_text(json.dumps(candidate, indent=2) + "\n")
+          manifest_path = Path("composer.json")
+          manifest = json.loads(manifest_path.read_text())
+          if manifest["require"].get("laravel/framework") != "^12.69.2":
+              raise SystemExit("STOP=UNEXPECTED_LARAVEL_TARGET")
+          manifest["repositories"] = [
+              {
+                  "type": "path",
+                  "url": str(temp),
+                  "canonical": True,
+                  "options": {"versions": {"fleetbase/core-api": "1.6.74"}},
+                  "only": ["fleetbase/core-api"],
+              },
+              {
+                  "type": "vcs",
+                  "url": "https://github.com/fleetbase/countries",
+                  "canonical": True,
+                  "only": ["fleetbase/countries"],
+              },
+          ] + manifest.get("repositories", [])
+          manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+          print("CORE_METADATA_ONLY_TEST=YES")
+          print("COUNTRIES_REQUIREMENT=0.9.0")
+          print("CORE_ILLUMINATE_REQUIREMENTS_PROBED=7_OF_7")
+          print("CORE_PRODUCT_CODE_MODIFIED=NO")
+          PY
+
+      - name: Run second solve against hypothetical Core API + real Countries 0.9
+        run: |
+          set +e
+          composer update laravel/framework fleetbase/core-api fleetbase/countries \
+            --with-all-dependencies --dry-run --no-plugins --no-scripts \
+            --no-progress --no-interaction --prefer-dist \
+            > "$RUNNER_TEMP/f8d2-core-countries-solver.txt" 2>&1
+          rc=$?
+          set -e
+          echo "CORE_COUNTRIES_HYPOTHESIS_SOLVER_RC=$rc"
+          sed -n '1,220p' "$RUNNER_TEMP/f8d2-core-countries-solver.txt"
+          if [ "$rc" -ne 0 ]; then
+            echo "CORE_COUNTRIES_HYPOTHESIS=BLOCKED_BY_OTHER_CONSTRAINTS_NO_GO"
+          else
+            echo "CORE_COUNTRIES_HYPOTHESIS=SOLVER_ONLY_PASS_CODE_UNTESTED_NO_GO"
+          fi
+
+
+      - name: Explain locked Carbon 2 consumers and selected Core API candidate
+        run: |
+          set +e
+          composer prohibits nesbot/carbon 3.8.4 --locked --tree > "$RUNNER_TEMP/f8d2-carbon3-prohibits.txt" 2>&1
+          echo "CARBON_PROHIBITS_LOCKED_RC=$?"
+          composer why pragmarx/ia-collection --locked --tree > "$RUNNER_TEMP/f8d2-ia-collection-why.txt" 2>&1
+          echo "IA_COLLECTION_WHY_RC=$?"
+          composer show --all fleetbase/core-api --format=json > "$RUNNER_TEMP/f8d2-core-available.json" 2>&1
+          echo "CORE_AVAILABLE_METADATA_RC=$?"
+          set -e
+          sed -n '1,75p' "$RUNNER_TEMP/f8d2-carbon3-prohibits.txt"
+          sed -n '1,75p' "$RUNNER_TEMP/f8d2-ia-collection-why.txt"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          f=Path(os.environ["RUNNER_TEMP"])/"f8d2-core-available.json"
+          try:
+              x=json.loads(f.read_text())
+              versions=x.get("versions",[])
+              require=x.get("requires",{})
+              print("CORE_AVAILABLE_VERSIONS=" + ",".join(str(v) for v in versions[:6]))
+              print("CORE_AVAILABLE_COUNTRIES_REQUIRE=" + str(require.get("fleetbase/countries","UNVERIFIED")))
+          except Exception as exc:
+              print("CORE_AVAILABLE_METADATA=UNVERIFIED:" + type(exc).__name__)
+          PY
+
+      - name: Probe explicit Carbon 3 and legacy Pragmarx lock updates
+        run: |
+          # This is still ONLY a dry-run. Do not commit root Carbon or generate a deployable lock.
+          composer require 'nesbot/carbon:^3.8.4' --no-update --no-plugins --no-scripts --no-interaction --no-progress
+          set +e
+          composer update laravel/framework fleetbase/core-api fleetbase/countries \
+            nesbot/carbon pragmarx/ia-collection pragmarx/coollection \
+            --with-all-dependencies --dry-run --no-plugins --no-scripts \
+            --no-progress --no-interaction --prefer-dist \
+            > "$RUNNER_TEMP/f8d2-carbon-explicit-solver.txt" 2>&1
+          rc=$?
+          set -e
+          echo "CORE_CARBON_EXPLICIT_SOLVER_RC=$rc"
+          sed -n '1,220p' "$RUNNER_TEMP/f8d2-carbon-explicit-solver.txt"
+          if [ "$rc" -ne 0 ]; then
+            echo "CORE_CARBON_EXPLICIT_SOLVER=NEXT_BLOCKERS_REMAIN_NO_GO"
+          else
+            echo "CORE_CARBON_EXPLICIT_SOLVER=SOLVED_METADATA_ONLY_NO_GO"
+          fi
+
+
+      - name: Probe Laravel 12 Termwind 2 with diagnostic-only Collision 8
+        run: |
+          # Laravel 12 requires termwind ^2; baseline collision ^7 requires termwind ^1.
+          # Modify require-dev in this disposable checkout ONLY.
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path("composer.json")
+          m=json.loads(p.read_text())
+          if m.get("require-dev",{}).get("nunomaduro/collision") != "^7.0":
+              raise SystemExit("STOP=UNEXPECTED_COLLISION_BASELINE")
+          m["require-dev"]["nunomaduro/collision"]="^8.0"
+          p.write_text(json.dumps(m, indent=2)+"\n")
+          print("COLLISION_ROOT_TEMP_ONLY=8")
+          PY
+          set +e
+          composer update laravel/framework fleetbase/core-api fleetbase/countries \
+            nesbot/carbon pragmarx/ia-collection pragmarx/coollection \
+            nunomaduro/collision nunomaduro/termwind \
+            --with-all-dependencies --dry-run --no-plugins --no-scripts \
+            --no-progress --no-interaction --prefer-dist \
+            > "$RUNNER_TEMP/f8d2-collision8-solver.txt" 2>&1
+          rc=$?
+          set -e
+          echo "COLLISION8_HYPOTHESIS_SOLVER_RC=$rc"
+          sed -n '1,200p' "$RUNNER_TEMP/f8d2-collision8-solver.txt"
+          if [ "$rc" -ne 0 ]; then
+            echo "COLLISION8_HYPOTHESIS=NEXT_BLOCKER_UNRESOLVED_NO_GO"
+          else
+            echo "COLLISION8_HYPOTHESIS=COMPOSER_ONLY_PASS_CODE_UNTESTED_NO_GO"
+          fi
+
+
+      - name: Probe validated upstream Barcode 12 Spatial 2 and Sanctum 4 dependency ranges
+        run: |
+          # This changes only synthetic Composer metadata inside the disposable runner.
+          # It does NOT establish any binary/API compatibility of those packages.
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          p=Path(os.environ["RUNNER_TEMP"])/"gst-f8d2-core-hypothetical"/"composer.json"
+          pkg=json.loads(p.read_text())
+          updates={
+              "milon/barcode":("^10.0","^12.0"),
+              "fleetbase/laravel-mysql-spatial":("^1.0.3","^2.0.0"),
+              "laravel/sanctum":("3.2.4","^4.0"),
+          }
+          for name, (expected, target) in updates.items():
+              if pkg["require"].get(name) != expected:
+                  raise SystemExit("STOP=HYPOTHESIS_BASELINE_MISMATCH:"+name)
+              pkg["require"][name]=target
+          p.write_text(json.dumps(pkg, indent=2)+"\n")
+          print("ADDITIONAL_CORE_METADATA_CHANGES=3_TARGETS_ONLY")
+          print("HYPOTHESIS_ONLY_NO_PRODUCT_CODE=PASS")
+          PY
+          set +e
+          composer update laravel/framework fleetbase/core-api fleetbase/countries \
+            nesbot/carbon pragmarx/ia-collection pragmarx/coollection \
+            nunomaduro/collision nunomaduro/termwind \
+            milon/barcode fleetbase/laravel-mysql-spatial laravel/sanctum \
+            --with-all-dependencies --dry-run --no-plugins --no-scripts \
+            --no-progress --no-interaction --prefer-dist \
+            > "$RUNNER_TEMP/f8d2-upstream-patch-targets.txt" 2>&1
+          rc=$?
+          set -e
+          echo "CORE_3_PACKAGES_HYPOTHESIS_SOLVER_RC=$rc"
+          sed -n '1,200p' "$RUNNER_TEMP/f8d2-upstream-patch-targets.txt"
+          if [ "$rc" -ne 0 ]; then
+            echo "CORE_3_PACKAGES_HYPOTHESIS=NEXT_BLOCKERS_REMAIN_NO_GO"
+          else
+            echo "CORE_3_PACKAGES_HYPOTHESIS=COMPOSER_ONLY_PASS_CODE_UNTESTED_NO_GO"
+          fi
+
+      - name: Upload diagnostics without publishing any deployable lock
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: gst-f8d2-laravel12-solver-logs-not-for-deployment
+          path: |
+            ${{ runner.temp }}/f8d2-locked-prohibits.txt
+            ${{ runner.temp }}/f8d2-laravel12-solver.txt
+            ${{ runner.temp }}/f8d2-core-countries-solver.txt
+            ${{ runner.temp }}/f8d2-carbon3-prohibits.txt
+            ${{ runner.temp }}/f8d2-ia-collection-why.txt
+            ${{ runner.temp }}/f8d2-core-available.json
+            ${{ runner.temp }}/f8d2-carbon-explicit-solver.txt
+            ${{ runner.temp }}/f8d2-collision8-solver.txt
+            ${{ runner.temp }}/f8d2-upstream-patch-targets.txt
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Keep metadata-only compatibility experiments NON-RELEASABLE
+        run: |
+          echo "CORE_API_CODE_COMPATIBILITY=UNVERIFIED"
+          echo "P0_F8D2_SECURITY_DECISION=NO_GO"
+          exit 1
+
+  baseline-security-audit:
+    name: Baseline Composer audit (MUST remain blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: api
+    env:
+      COMPOSER_NO_AUDIT: '0'
+    steps:
+      - name: Checkout original (not modified) dependency lock
+        uses: actions/checkout@v4
+
+      - name: Set up PHP 8.2 and Composer
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          coverage: none
+
+      - name: Audit original lock without advisory exceptions
+        run: composer audit --locked --format=summary
