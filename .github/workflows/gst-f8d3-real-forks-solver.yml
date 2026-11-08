@@ -363,6 +363,47 @@ jobs:
           vendor/bin/phpunit -c phpunit.xml --testsuite Feature --colors=never
           echo "LARAVEL12_API_FEATURE_HEALTH_TESTS=PASS"
 
+      - name: Bootstrap Laravel 12 package discovery and enumerate routes without external services
+        env:
+          APP_ENV: testing
+          APP_URL: http://localhost.test
+          DB_CONNECTION: sqlite
+          DB_DATABASE: ':memory:'
+          CACHE_STORE: array
+          CACHE_DRIVER: array
+          MAIL_MAILER: array
+          QUEUE_CONNECTION: sync
+          SESSION_DRIVER: array
+          LOG_CHANNEL: stderr
+          TELESCOPE_ENABLED: 'false'
+        run: |
+          export APP_KEY="$(php -r 'echo "base64:".base64_encode(random_bytes(32));')"
+          if ! php artisan package:discover --no-ansi > "$RUNNER_TEMP/gst-laravel12-discover.log" 2>&1; then
+            echo "STOP=LARAVEL12_PACKAGE_DISCOVERY_FAILED"
+            tail -n 50 "$RUNNER_TEMP/gst-laravel12-discover.log"
+            exit 2
+          fi
+          echo "LARAVEL12_PACKAGE_DISCOVERY=PASS"
+          if ! php artisan route:list --json --no-ansi > "$RUNNER_TEMP/gst-laravel12-routes.json" 2> "$RUNNER_TEMP/gst-laravel12-routes-errors.log"; then
+            echo "STOP=LARAVEL12_ROUTE_LIST_FAILED"
+            tail -n 45 "$RUNNER_TEMP/gst-laravel12-routes-errors.log"
+            exit 2
+          fi
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          routes=json.loads(Path(__import__('os').environ["RUNNER_TEMP"]).joinpath("gst-laravel12-routes.json").read_text())
+          if not isinstance(routes,list) or len(routes)<3:
+              raise SystemExit("STOP=UNEXPECTED_LARAVEL12_ROUTE_CATALOG")
+          names={r.get("uri","") for r in routes}
+          if "/" not in names and "" not in names:
+              raise SystemExit("STOP=LARAVEL12_ROOT_ROUTE_MISSING")
+          if "health" not in names:
+              raise SystemExit("STOP=LARAVEL12_HEALTH_ROUTE_MISSING")
+          print("LARAVEL12_ROUTE_CATALOG=PASS")
+          print("LARAVEL12_ROUTE_COUNT="+str(len(routes)))
+          PY
+
       - name: Upload ONLY diagnostic output (no composer.lock)
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
