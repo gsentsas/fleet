@@ -29,7 +29,7 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.2'
-          extensions: mbstring, xml, gd, zip, pdo_mysql, intl, bcmath, gmp
+          extensions: mbstring, xml, gd, zip, pdo_mysql, pdo_sqlite, sqlite3, intl, bcmath, gmp
           coverage: none
 
       - name: Configure read-only GitHub Composer API token
@@ -216,25 +216,25 @@ jobs:
           declare(strict_types=1);
           require 'vendor/autoload.php';
           $required = [
-              \\Illuminate\\Foundation\\Application::class,
-              \\Fleetbase\\Support\\PushNotification::class,
-              \\Fleetbase\\FleetOps\\Support\\Geocoding::class,
-              \\Geocoder\\Laravel\\Http\\LaravelHttpClient::class,
-              \\AaronFrancis\\FastPaginate\\FastPaginateProvider::class,
+              \Illuminate\Foundation\Application::class,
+              \Fleetbase\Support\PushNotification::class,
+              \Fleetbase\FleetOps\Support\Geocoding::class,
+              \Geocoder\Laravel\Http\LaravelHttpClient::class,
+              \AaronFrancis\FastPaginate\FastPaginateProvider::class,
           ];
           foreach ($required as $name) {
               if (!class_exists($name)) {
-                  fwrite(STDERR, "STOP=RUNTIME_CLASS_NOT_FOUND:".$name."\\n");
+                  fwrite(STDERR, "STOP=RUNTIME_CLASS_NOT_FOUND:".$name."\n");
                   exit(2);
               }
           }
-          if (!str_starts_with(\\Illuminate\\Foundation\\Application::VERSION, '12.')) {
-              fwrite(STDERR, "STOP=UNEXPECTED_FRAMEWORK_MAJOR\\n"); exit(2);
+          if (!str_starts_with(\Illuminate\Foundation\Application::VERSION, '12.')) {
+              fwrite(STDERR, "STOP=UNEXPECTED_FRAMEWORK_MAJOR\n"); exit(2);
           }
-          if (!is_subclass_of(\\Geocoder\\Laravel\\Http\\LaravelHttpClient::class, \\Psr\\Http\\Client\\ClientInterface::class)) {
-              fwrite(STDERR, "STOP=GEOCODER_NOT_PSR18\\n"); exit(2);
+          if (!is_subclass_of(\Geocoder\Laravel\Http\LaravelHttpClient::class, \Psr\Http\Client\ClientInterface::class)) {
+              fwrite(STDERR, "STOP=GEOCODER_NOT_PSR18\n"); exit(2);
           }
-          echo "LARAVEL12_AUTOLOAD_SMOKE=PASS_FRAMEWORK_AND_FORKS\\n";
+          echo "LARAVEL12_AUTOLOAD_SMOKE=PASS_FRAMEWORK_AND_FORKS\n";
           PHP
 
       - name: Run real API PHPUnit unit tests on isolated Laravel 12 candidate
