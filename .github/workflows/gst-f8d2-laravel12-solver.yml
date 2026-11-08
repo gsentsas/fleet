@@ -213,6 +213,39 @@ jobs:
             echo "CORE_CARBON_EXPLICIT_SOLVER=SOLVED_METADATA_ONLY_NO_GO"
           fi
 
+
+      - name: Probe Laravel 12 Termwind 2 with diagnostic-only Collision 8
+        run: |
+          # Laravel 12 requires termwind ^2; baseline collision ^7 requires termwind ^1.
+          # Modify require-dev in this disposable checkout ONLY.
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path("composer.json")
+          m=json.loads(p.read_text())
+          if m.get("require-dev",{}).get("nunomaduro/collision") != "^7.0":
+              raise SystemExit("STOP=UNEXPECTED_COLLISION_BASELINE")
+          m["require-dev"]["nunomaduro/collision"]="^8.0"
+          p.write_text(json.dumps(m, indent=2)+"\n")
+          print("COLLISION_ROOT_TEMP_ONLY=8")
+          PY
+          set +e
+          composer update laravel/framework fleetbase/core-api fleetbase/countries \
+            nesbot/carbon pragmarx/ia-collection pragmarx/coollection \
+            nunomaduro/collision nunomaduro/termwind \
+            --with-all-dependencies --dry-run --no-plugins --no-scripts \
+            --no-progress --no-interaction --prefer-dist \
+            > "$RUNNER_TEMP/f8d2-collision8-solver.txt" 2>&1
+          rc=$?
+          set -e
+          echo "COLLISION8_HYPOTHESIS_SOLVER_RC=$rc"
+          sed -n '1,200p' "$RUNNER_TEMP/f8d2-collision8-solver.txt"
+          if [ "$rc" -ne 0 ]; then
+            echo "COLLISION8_HYPOTHESIS=NEXT_BLOCKER_UNRESOLVED_NO_GO"
+          else
+            echo "COLLISION8_HYPOTHESIS=COMPOSER_ONLY_PASS_CODE_UNTESTED_NO_GO"
+          fi
+
       - name: Upload diagnostics without publishing any deployable lock
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
@@ -226,6 +259,7 @@ jobs:
             ${{ runner.temp }}/f8d2-ia-collection-why.txt
             ${{ runner.temp }}/f8d2-core-available.json
             ${{ runner.temp }}/f8d2-carbon-explicit-solver.txt
+            ${{ runner.temp }}/f8d2-collision8-solver.txt
           if-no-files-found: warn
           retention-days: 7
 
