@@ -44,9 +44,15 @@ jobs:
           composer config --global --json policy.advisories.ignore-id '{"PKSA-zwc5-qtrz-zm1n":{"on-audit":false,"reason":"Temporary resolution of the pinned GST FleetOps source in an ephemeral GitHub runner only; production NO-GO."},"PKSA-b41t-wbzk-9q51":{"on-audit":false,"reason":"Temporary resolution of the pinned GST FleetOps source in an ephemeral GitHub runner only; production NO-GO."},"PKSA-d5tc-s1qs-h781":{"on-audit":false,"reason":"Temporary resolution of the pinned GST FleetOps source in an ephemeral GitHub runner only; production NO-GO."},"PKSA-3r5d-mb8f-1qw9":{"on-audit":false,"reason":"Temporary resolution of the pinned GST FleetOps source in an ephemeral GitHub runner only; production NO-GO."},"PKSA-m5cs-t1y6-qpcs":{"on-audit":false,"reason":"Temporary resolution of the pinned GST FleetOps source in an ephemeral GitHub runner only; production NO-GO."},"PKSA-mdq4-51ck-6kdq":{"on-audit":false,"reason":"Temporary resolution of the pinned GST FleetOps source in an ephemeral GitHub runner only; production NO-GO."},"PKSA-8qx3-n5y5-vvnd":{"on-audit":false,"reason":"Temporary resolution of the pinned GST FleetOps source in an ephemeral GitHub runner only; production NO-GO."},"PKSA-w7xr-vk7n-rstm":{"on-audit":false,"reason":"Temporary resolution of the pinned GST FleetOps source in an ephemeral GitHub runner only; production NO-GO."}}'
           composer config --global policy.advisories.ignore-id
 
+      - name: Snapshot the original immutable API lock
+        run: |
+          test -s composer.lock
+          cp composer.lock "$RUNNER_TEMP/gst-original-composer.lock"
+
       - name: Resolve ONLY FleetOps dependency against the pinned fork
         run: |
-          composer update fleetbase/fleetops-api --with-all-dependencies --minimal-changes --no-plugins --no-scripts --no-progress --no-interaction --prefer-dist
+          # No --with-all-dependencies: it can move the unlocked 10.x-dev Laravel framework SHA.
+          composer update fleetbase/fleetops-api --minimal-changes --no-plugins --no-scripts --no-progress --no-interaction --prefer-dist
 
       - name: Verify the exact FleetOps source and immutable commit
         run: |
@@ -59,6 +65,35 @@ jobs:
             if (($package["source"]["reference"] ?? "") !== "b1f43dec2934ba83225c940f1442bd4d886b0f32") { fwrite(STDERR, "STOP=UNEXPECTED_FLEETOPS_SHA\n"); exit(2); }
             echo "FLEETOPS_VCS_SOURCE=PASS_GST_FORK\n";
             echo "FLEETOPS_LOCK_REF=PASS_EXACT_SHA\n";
+          '
+
+      - name: Refuse ALL non-FleetOps locked package changes
+        run: |
+          php -r '
+            $original = json_decode(file_get_contents(getenv("RUNNER_TEMP") . "/gst-original-composer.lock"), true, 512, JSON_THROW_ON_ERROR);
+            $candidate = json_decode(file_get_contents("composer.lock"), true, 512, JSON_THROW_ON_ERROR);
+            foreach (["packages", "packages-dev"] as $section) {
+              $index = static fn($rows) => array_column($rows, null, "name");
+              $before = $index($original[$section] ?? []);
+              $after = $index($candidate[$section] ?? []);
+              if (count($before) !== count($after) || array_diff_key($before, $after) || array_diff_key($after, $before)) {
+                fwrite(STDERR, "STOP=UNRELATED_PACKAGE_SET_CHANGED\n"); exit(2);
+              }
+              foreach ($before as $name => $pkg) {
+                if ($name === "fleetbase/fleetops-api") { continue; }
+                $check = static fn($p) => [
+                  $p["version"] ?? null,
+                  $p["source"]["url"] ?? null,
+                  $p["source"]["reference"] ?? null,
+                  $p["dist"]["url"] ?? null,
+                  $p["dist"]["reference"] ?? null
+                ];
+                if ($check($pkg) !== $check($after[$name])) {
+                  fwrite(STDERR, "STOP=UNRELATED_PACKAGE_REF_CHANGED:".$name."\n"); exit(2);
+                }
+              }
+            }
+            echo "NON_FLEETOPS_PACKAGES_UNCHANGED=PASS\n";
           '
 
       - name: Check Composer lock consistency without scripts
@@ -100,4 +135,4 @@ jobs:
       - name: Audit without any exceptions
         env:
           COMPOSER_NO_AUDIT: "0"
-        run: composer audit --locked --format=summary
+        run: composer audit --locked --format=plain
