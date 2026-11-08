@@ -264,6 +264,69 @@ jobs:
           echo "LARAVEL12_GEOCODER_NOTIFICATION_CONTRACTS=PASS_NO_NETWORK\n";
           PHP
 
+      - name: Test Core FCM notification and FastPaginate 2 behavior with SQLite and no network
+        run: |
+          php <<'PHP'
+          <?php
+          declare(strict_types=1);
+          require 'vendor/autoload.php';
+
+          $app = new \Illuminate\Foundation\Application(getcwd());
+          $app->instance('config', new \Illuminate\Config\Repository([
+              'firebase' => ['projects' => ['app' => ['project_id' => 'fake-project']]],
+          ]));
+          \Illuminate\Container\Container::setInstance($app);
+          \Illuminate\Support\Facades\Facade::setFacadeApplication($app);
+
+          class GstFcmProbe extends \Fleetbase\Support\PushNotification {
+              public static \Kreait\Firebase\Contract\Messaging $messaging;
+              protected static function getFcmMessagingClient(): \Kreait\Firebase\Contract\Messaging {
+                  return self::$messaging;
+              }
+          }
+          GstFcmProbe::$messaging = \Mockery::mock(\Kreait\Firebase\Contract\Messaging::class);
+          $message = GstFcmProbe::createFcmMessage('Dispatch', 'Order ready', ['order_uuid' => 'order-1']);
+          if ($message->notification->title !== 'Dispatch' || $message->data !== ['order_uuid' => 'order-1']) {
+              fwrite(STDERR, "STOP=FCM_VALID_STRING_PAYLOAD_REGRESSION\n"); exit(2);
+          }
+          $rejected = false;
+          try {
+              GstFcmProbe::createFcmMessage('Dispatch', 'Order ready', ['count' => 2]);
+          } catch (\InvalidArgumentException $e) {
+              $rejected = true;
+          }
+          if (!$rejected) { fwrite(STDERR, "STOP=FCM_NON_STRING_DATA_NOT_REJECTED\n"); exit(2); }
+          \Mockery::close();
+          echo "LARAVEL12_CORE_FCM_CONTRACT=PASS_STRING_VALUES_AND_NONSTRING_REJECTION\n";
+
+          $capsule = new \Illuminate\Database\Capsule\Manager($app);
+          $capsule->addConnection(['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => ''], 'default');
+          $capsule->setAsGlobal();
+          $capsule->bootEloquent();
+          $schema = $capsule->getConnection('default')->getSchemaBuilder();
+          $schema->create('gst_fast_page', static function (\Illuminate\Database\Schema\Blueprint $table) {
+              $table->increments('id');
+              $table->string('label');
+          });
+          $capsule->getConnection('default')->table('gst_fast_page')->insert([
+              ['label' => 'Alpha'], ['label' => 'Beta'], ['label' => 'Gamma'],
+          ]);
+          (new \AaronFrancis\FastPaginate\FastPaginateProvider($app))->boot();
+          class GstFastPageRecord extends \Illuminate\Database\Eloquent\Model {
+              protected $table = 'gst_fast_page';
+              public $timestamps = false;
+              protected $guarded = [];
+          }
+          $page = GstFastPageRecord::query()->orderBy('id')->fastPaginate(2);
+          if (!$page instanceof \Illuminate\Pagination\LengthAwarePaginator ||
+              $page->total() !== 3 || $page->count() !== 2 ||
+              array_map(static fn($m) => $m->label, $page->items()) !== ['Alpha', 'Beta']) {
+              fwrite(STDERR, "STOP=FAST_PAGINATE_RESULT_CHANGED\n"); exit(2);
+          }
+          echo "LARAVEL12_FAST_PAGINATE2_SQLITE=PASS_3_RECORDS_PAGE_SIZE_2\n";
+          echo "LARAVEL12_BUSINESS_CONTRACTS=PASS_NO_NETWORK\n";
+          PHP
+
       - name: Run real API PHPUnit unit tests on isolated Laravel 12 candidate
         env:
           APP_ENV: testing
