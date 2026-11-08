@@ -96,7 +96,9 @@ jobs:
           print("CANDIDATE_LARAVEL_TARGET=12.69.2")
           print("APP_PRODUCT_FILES_MODIFIED=NO_EPHEMERAL_CI_ONLY")
           PY
-          composer validate --no-check-publish
+          # Lock validation is deferred until after the ephemeral Composer update:
+          # this manifest intentionally differs from the still-pinned Laravel 10 lock.
+          composer validate --no-check-lock --no-check-publish
 
       - name: Attempt full Composer resolution on disposable runner WITHOUT security waivers
         id: solve
