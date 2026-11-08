@@ -62,11 +62,12 @@ jobs:
             --minimal-changes --no-install --no-scripts --no-plugins \
             --no-progress --no-interaction --prefer-dist
 
-      - name: Validate the ten patched packages and forbid all other drift
+      - name: Validate the nine patched packages and forbid all other drift
         run: |
           php <<'PHP'
           <?php
           declare(strict_types=1);
+          if (!defined('STDERR')) { define('STDERR', fopen('php://stderr', 'w')); }
           $before = json_decode(file_get_contents(getenv("RUNNER_TEMP")."/gst-baseline-composer.lock"), true, 512, JSON_THROW_ON_ERROR);
           $after  = json_decode(file_get_contents("composer.lock"), true, 512, JSON_THROW_ON_ERROR);
           $targets = [
@@ -116,7 +117,8 @@ jobs:
             $baseline = array_column(array_merge($before["packages"] ?? [], $before["packages-dev"] ?? []), null, "name");
             $baseVersion = ltrim((string) ($baseline[$name]["version"] ?? ""), "v");
             if (str_starts_with($baseVersion, "6.4.")) {
-              $min = "6.4.50";
+              // Symfony Mime fixed CVE-2026-45070 in 6.4.49 (confirmed by upstream).
+              $min = $name === "symfony/mime" ? "6.4.49" : "6.4.50";
               if (!str_starts_with($oldVersion,"6.4.")) { fwrite(STDERR,"STOP=SYMFONY_SERIES_CHANGED\n"); exit(2); }
             } elseif (str_starts_with($baseVersion, "7.4.")) {
               $min = "7.4.23";
