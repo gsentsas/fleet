@@ -72,8 +72,8 @@ jobs:
           if m.get("config",{}).get("policy",{}).get("advisories"):
               raise SystemExit("STOP=ROOT_POLICY_UNEXPECTED")
           m["require"]["laravel/framework"]="^12.69.2"
-          m["require"]["fleetbase/core-api"]="dev-compat/p0-f8d3-laravel12-foundation#3e19ba09e6c6607c9fe9ef592e5aed2be344c213 as 1.6.74"
-          m["require"]["fleetbase/storefront-api"]="dev-compat/p0-f8d3-laravel12-foundation#b4c170344800a5829dd1f2ce582f6bbe7adebb6e as 0.4.31"
+          m["require"]["fleetbase/core-api"]="dev-compat/p0-f8d3-laravel12-foundation#5352c882c5619af94c0e1ac0ff0abb3409c08bae as 1.6.74"
+          m["require"]["fleetbase/storefront-api"]="dev-compat/p0-f8d3-laravel12-foundation#d627973251966762d1836cc04c2bc56959c788b1 as 0.4.31"
           m["require"]["fleetbase/fleetops-api"]="dev-security/gstfleet-webhook-auth-v075#b1f43dec2934ba83225c940f1442bd4d886b0f32 as 0.6.75"
           if m["require-dev"].get("nunomaduro/collision")!="^7.0":
               raise SystemExit("STOP=COLLISION_EXPECTED_7")
@@ -130,8 +130,8 @@ jobs:
           lock=json.loads(Path("composer.lock").read_text())
           packages={p["name"]:p for p in lock.get("packages",[])}
           pins={
-              "fleetbase/core-api":("https://github.com/gsentsas/core-api.git","3e19ba09e6c6607c9fe9ef592e5aed2be344c213"),
-              "fleetbase/storefront-api":("https://github.com/gsentsas/storefront.git","b4c170344800a5829dd1f2ce582f6bbe7adebb6e"),
+              "fleetbase/core-api":("https://github.com/gsentsas/core-api.git","5352c882c5619af94c0e1ac0ff0abb3409c08bae"),
+              "fleetbase/storefront-api":("https://github.com/gsentsas/storefront.git","d627973251966762d1836cc04c2bc56959c788b1"),
               "fleetbase/fleetops-api":("https://github.com/gsentsas/fleetops.git","b1f43dec2934ba83225c940f1442bd4d886b0f32"),
           }
           for name,(url,sha) in pins.items():
