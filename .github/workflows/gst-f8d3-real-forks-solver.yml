@@ -72,7 +72,7 @@ jobs:
           if m.get("config",{}).get("policy",{}).get("advisories"):
               raise SystemExit("STOP=ROOT_POLICY_UNEXPECTED")
           m["require"]["laravel/framework"]="^12.69.2"
-          m["require"]["fleetbase/core-api"]="dev-compat/p0-f8d3-laravel12-foundation#5352c882c5619af94c0e1ac0ff0abb3409c08bae as 1.6.74"
+          m["require"]["fleetbase/core-api"]="dev-compat/p0-f8d3-laravel12-foundation#ca58d8969ce55988ea76090d803676c98f2c844c as 1.6.74"
           m["require"]["fleetbase/storefront-api"]="dev-compat/p0-f8d3-laravel12-foundation#d627973251966762d1836cc04c2bc56959c788b1 as 0.4.31"
           m["require"]["fleetbase/fleetops-api"]="dev-compat/p0-f8d3-laravel12-barcode#edab94bf27278c4885f5078db02acccb60120c51 as 0.6.75"
           if m["require-dev"].get("nunomaduro/collision")!="^7.0":
@@ -130,7 +130,7 @@ jobs:
           lock=json.loads(Path("composer.lock").read_text())
           packages={p["name"]:p for p in lock.get("packages",[])}
           pins={
-              "fleetbase/core-api":("https://github.com/gsentsas/core-api.git","5352c882c5619af94c0e1ac0ff0abb3409c08bae"),
+              "fleetbase/core-api":("https://github.com/gsentsas/core-api.git","ca58d8969ce55988ea76090d803676c98f2c844c"),
               "fleetbase/storefront-api":("https://github.com/gsentsas/storefront.git","d627973251966762d1836cc04c2bc56959c788b1"),
               "fleetbase/fleetops-api":("https://github.com/gsentsas/fleetops.git","edab94bf27278c4885f5078db02acccb60120c51"),
           }
