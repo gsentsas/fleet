@@ -135,7 +135,13 @@ jobs:
             # Public fork refs already returned anonymous HTTP 200 above.
             # Avoid feeding an exhausted token back to Composer; do not add scopes.
             composer config --global --unset github-oauth.github.com || true
-            echo "COMPOSER_SOURCE_AUTH=PUBLIC_ANONYMOUS_NO_EXHAUSTED_TOKEN"
+            # Force raw Git transport for public VCS metadata: no GitHub REST API quota.
+            composer config --global use-github-api false
+            for name in core-api storefront fleetops; do
+              git ls-remote --exit-code "https://github.com/gsentsas/$name.git" HEAD >/dev/null
+              echo "PUBLIC_GIT_TRANSPORT_$name=PASS"
+            done
+            echo "COMPOSER_SOURCE_AUTH=PUBLIC_GIT_DIRECT_NO_GITHUB_API"
           else
             echo "COMPOSER_SOURCE_AUTH=GITHUB_TOKEN_AVAILABLE"
           fi
