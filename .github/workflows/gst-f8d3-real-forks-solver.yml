@@ -1,0 +1,179 @@
+name: GST P0-F8D3 real fork dependency proof (NO GO)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/gst-f8d3-real-forks-solver.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  real-forks-compatibility:
+    name: PHP 8.2 / Composer / 3 pinned real forks (diagnostic)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: api
+    env:
+      COMPOSER_NO_INTERACTION: '1'
+      COMPOSER_PROCESS_TIMEOUT: '600'
+    steps:
+      - name: Checkout original unmodified Fleetbase
+        uses: actions/checkout@v4
+
+      - name: PHP 8.2 and Composer
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, xml, gd, zip, pdo_mysql, intl, bcmath, gmp
+          coverage: none
+
+      - name: Configure read-only GitHub Composer API token
+        env:
+          GH_JOB_TOKEN: ${{ github.token }}
+        run: composer config --global github-oauth.github.com "$GH_JOB_TOKEN"
+
+      - name: Confirm original release is still pinned to Laravel 10
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          m=json.loads(Path("composer.json").read_text())
+          lock=json.loads(Path("composer.lock").read_text())
+          expected={
+              "laravel/framework": "^10.0",
+              "fleetbase/core-api": "^1.6.74",
+              "fleetbase/storefront-api": "^0.4.31",
+              "fleetbase/fleetops-api": "^0.6.75",
+          }
+          for key, version in expected.items():
+              if m["require"].get(key)!=version:
+                  raise SystemExit("STOP=CHANGED_ROOT_REQUIRE:"+key)
+          names={p["name"]:p for p in lock.get("packages",[])}
+          if names["fleetbase/core-api"]["source"]["reference"]!="ac97b5620b260660ae4e6fd5ea0e64025629b0c9":
+              raise SystemExit("STOP=CHANGED_CORE_BASELINE")
+          if names["fleetbase/storefront-api"]["source"]["reference"]!="2a5dd325b4d2777f0b644da53cf5c902a8e7ffc2":
+              raise SystemExit("STOP=CHANGED_STOREFRONT_BASELINE")
+          if names["fleetbase/fleetops-api"]["source"]["reference"]!="811aa711a68833dfd8390d8ddac582d4ed75f3c6":
+              raise SystemExit("STOP=CHANGED_FLEETOPS_BASELINE")
+          print("PINNED_ORIGINAL_BASELINE=PASS")
+          PY
+
+      - name: Write three real fork SHAs and Laravel 12 target in EPHEMERAL manifest only
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          mfile=Path("composer.json")
+          m=json.loads(mfile.read_text())
+          if m.get("config",{}).get("policy",{}).get("advisories"):
+              raise SystemExit("STOP=ROOT_POLICY_UNEXPECTED")
+          m["require"]["laravel/framework"]="^12.69.2"
+          m["require"]["fleetbase/core-api"]="dev-compat/p0-f8d3-laravel12-foundation#3e19ba09e6c6607c9fe9ef592e5aed2be344c213 as 1.6.74"
+          m["require"]["fleetbase/storefront-api"]="dev-compat/p0-f8d3-laravel12-foundation#b4c170344800a5829dd1f2ce582f6bbe7adebb6e as 0.4.31"
+          m["require"]["fleetbase/fleetops-api"]="dev-security/gstfleet-webhook-auth-v075#b1f43dec2934ba83225c940f1442bd4d886b0f32 as 0.6.75"
+          if m["require-dev"].get("nunomaduro/collision")!="^7.0":
+              raise SystemExit("STOP=COLLISION_EXPECTED_7")
+          if m["require-dev"].get("phpunit/phpunit")!="^10.0":
+              raise SystemExit("STOP=PHPUNIT_EXPECTED_10")
+          m["require-dev"]["nunomaduro/collision"]="^8.0"
+          m["require-dev"]["phpunit/phpunit"]="^11.0"
+          sources=[
+              ("gsentsas/core-api","fleetbase/core-api"),
+              ("gsentsas/storefront","fleetbase/storefront-api"),
+              ("gsentsas/fleetops","fleetbase/fleetops-api"),
+          ]
+          m["repositories"]=[
+              {"type":"vcs","url":"https://github.com/"+repo,"canonical":True,"only":[name]}
+              for repo,name in sources
+          ]+m.get("repositories",[])
+          mfile.write_text(json.dumps(m,indent=4)+"\n")
+          print("CANDIDATE_SOURCE_COUNT=3")
+          print("CANDIDATE_SOURCE_PROVENANCE=EXACT_SHA")
+          print("CANDIDATE_LARAVEL_TARGET=12.69.2")
+          print("APP_PRODUCT_FILES_MODIFIED=NO_EPHEMERAL_CI_ONLY")
+          PY
+          composer validate --no-check-publish
+
+      - name: Attempt full Composer resolution on disposable runner WITHOUT security waivers
+        id: solve
+        run: |
+          set +e
+          composer update --no-install --no-plugins --no-scripts \
+            --no-progress --no-interaction --prefer-dist \
+            > "$RUNNER_TEMP/gst-f8d3-real-forks-solver.log" 2>&1
+          rc=$?
+          set -e
+          echo "$rc" > "$RUNNER_TEMP/gst-f8d3-solver-rc.txt"
+          echo "REAL_FORKS_SOLVER_RC=$rc"
+          tail -n 180 "$RUNNER_TEMP/gst-f8d3-real-forks-solver.log"
+          if [ "$rc" -ne 0 ]; then
+            echo "REAL_FORKS_SOLVER=BLOCKED_NO_GO"
+          else
+            echo "REAL_FORKS_SOLVER=RESOLVED_CODE_UNTESTED_NO_GO"
+          fi
+
+      - name: Check exact fork commit refs ONLY if resolution passed
+        run: |
+          if [ "$(cat "$RUNNER_TEMP/gst-f8d3-solver-rc.txt")" -ne 0 ]; then
+            echo "FORK_LOCK_PROOF=NOT_PRODUCED"
+            exit 0
+          fi
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          lock=json.loads(Path("composer.lock").read_text())
+          packages={p["name"]:p for p in lock.get("packages",[])}
+          pins={
+              "fleetbase/core-api":("https://github.com/gsentsas/core-api.git","3e19ba09e6c6607c9fe9ef592e5aed2be344c213"),
+              "fleetbase/storefront-api":("https://github.com/gsentsas/storefront.git","b4c170344800a5829dd1f2ce582f6bbe7adebb6e"),
+              "fleetbase/fleetops-api":("https://github.com/gsentsas/fleetops.git","b1f43dec2934ba83225c940f1442bd4d886b0f32"),
+          }
+          for name,(url,sha) in pins.items():
+              entry=packages.get(name)
+              if entry is None or entry.get("source",{}).get("url")!=url or entry.get("source",{}).get("reference")!=sha:
+                  raise SystemExit("STOP=UNPINNED_FORK:"+name)
+          print("ALL_THREE_FORKS_PINNED=PASS_EXACT_SHAS")
+          PY
+          composer audit --locked --format=plain
+
+      - name: Upload ONLY diagnostic output (no composer.lock)
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: gst-f8d3-real-forks-solver-logs-NOT-DEPLOYABLE
+          path: |
+            ${{ runner.temp }}/gst-f8d3-real-forks-solver.log
+            ${{ runner.temp }}/gst-f8d3-solver-rc.txt
+          retention-days: 7
+          if-no-files-found: warn
+
+      - name: Prevent release from a compatibility experiment
+        if: ${{ always() }}
+        run: |
+          echo "LARAVEL12_CODE_COMPATIBILITY=UNVERIFIED"
+          echo "F8D3_PRODUCTION_DECISION=NO_GO"
+          exit 1
+
+  baseline-security:
+    name: Original dependency security audit (must block)
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    defaults:
+      run:
+        working-directory: api
+    env:
+      COMPOSER_NO_AUDIT: '0'
+    steps:
+      - name: Checkout unmodified original API lock
+        uses: actions/checkout@v4
+      - name: Set up PHP 8.2 and Composer
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          coverage: none
+      - name: Audit original API lock with no exceptions
+        run: composer audit --locked --format=plain
