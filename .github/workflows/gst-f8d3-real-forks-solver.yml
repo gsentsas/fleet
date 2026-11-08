@@ -14,6 +14,19 @@ jobs:
     name: PHP 8.2 / Composer / 3 pinned real forks (diagnostic)
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    services:
+      mysql:
+        image: mysql:8.0-oracle
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+          MYSQL_DATABASE: gst_f8d3_probe
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
     defaults:
       run:
         working-directory: api
@@ -403,6 +416,53 @@ jobs:
           print("LARAVEL12_ROUTE_CATALOG=PASS")
           print("LARAVEL12_ROUTE_COUNT="+str(len(routes)))
           PY
+
+      - name: Replay all Laravel 12 package migrations against disposable MySQL 8
+        env:
+          APP_ENV: testing
+          APP_URL: http://localhost.test
+          DB_CONNECTION: mysql
+          DB_HOST: 127.0.0.1
+          DB_PORT: '3306'
+          DB_DATABASE: gst_f8d3_probe
+          DB_USERNAME: root
+          DB_PASSWORD: ''
+          CACHE_STORE: array
+          CACHE_DRIVER: array
+          MAIL_MAILER: array
+          QUEUE_CONNECTION: sync
+          SESSION_DRIVER: array
+          LOG_CHANNEL: stderr
+          TELESCOPE_ENABLED: 'false'
+        run: |
+          export APP_KEY="$(php -r 'echo "base64:".base64_encode(random_bytes(32));')"
+          php -r '$db=new PDO("mysql:host=127.0.0.1;port=3306;dbname=gst_f8d3_probe","root",""); echo "MYSQL8_DISPOSABLE_CONNECTION=PASS\n";'
+          if ! php artisan migrate --force --no-interaction --no-ansi > "$RUNNER_TEMP/gst-f8d3-migrate.log" 2>&1; then
+            echo "STOP=LARAVEL12_MYSQL8_MIGRATIONS_FAILED"
+            tail -n 75 "$RUNNER_TEMP/gst-f8d3-migrate.log"
+            exit 2
+          fi
+          echo "LARAVEL12_MYSQL8_MIGRATIONS=PASS"
+          php <<'PHP'
+          <?php
+          declare(strict_types=1);
+          $pdo = new PDO(
+              'mysql:host=127.0.0.1;port=3306;dbname=gst_f8d3_probe',
+              'root', '',
+              [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
+          );
+          $tables = $pdo->query("SHOW TABLES")->fetchAll(PDO::FETCH_COLUMN);
+          if (count($tables) < 100) {
+              fwrite(STDERR, "STOP=MYSQL8_MIGRATION_TABLE_COUNT_UNEXPECTED:".count($tables)."\n");
+              exit(2);
+          }
+          foreach (['users','companies','orders','drivers'] as $table) {
+              if (!in_array($table, $tables, true)) {
+                  fwrite(STDERR, "STOP=MYSQL8_TABLE_MISSING:".$table."\n"); exit(2);
+              }
+          }
+          echo "LARAVEL12_MYSQL8_TABLES=PASS_COUNT_".count($tables)."\n";
+          PHP
 
       - name: Upload ONLY diagnostic output (no composer.lock)
         if: ${{ always() }}
