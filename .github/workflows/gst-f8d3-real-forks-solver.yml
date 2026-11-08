@@ -237,6 +237,33 @@ jobs:
           echo "LARAVEL12_AUTOLOAD_SMOKE=PASS_FRAMEWORK_AND_FORKS\n";
           PHP
 
+      - name: Exercise installed FleetOps Geocoder and notification contracts without network
+        env:
+          APP_ENV: testing
+        run: |
+          php <<'PHP'
+          <?php
+          declare(strict_types=1);
+          require 'vendor/autoload.php';
+          $path = 'vendor/fleetbase/fleetops-api/server/config/geocoder.php';
+          if (!is_file($path)) { fwrite(STDERR, "STOP=GEOCODER_CONFIG_NOT_INSTALLED\n"); exit(2); }
+          $config = require $path;
+          if (($config['adapter'] ?? null) !== \Geocoder\Laravel\Http\LaravelHttpClient::class) {
+              fwrite(STDERR, "STOP=GEOCODER_ADAPTER_MISMATCH\n"); exit(2);
+          }
+          if (!isset($config['providers'][\Geocoder\Provider\Chain\Chain::class][\Geocoder\Provider\GoogleMaps\GoogleMaps::class])) {
+              fwrite(STDERR, "STOP=GOOGLE_MAPS_CHAIN_MISSING\n"); exit(2);
+          }
+          foreach ([
+              \NotificationChannels\Fcm\FcmMessage::class,
+              \NotificationChannels\Twilio\TwilioSmsMessage::class,
+              \Fleetbase\Twilio\Twilio::class,
+          ] as $name) {
+              if (!class_exists($name)) { fwrite(STDERR, "STOP=NOTIFICATION_CLASS_MISSING:".$name."\n"); exit(2); }
+          }
+          echo "LARAVEL12_GEOCODER_NOTIFICATION_CONTRACTS=PASS_NO_NETWORK\n";
+          PHP
+
       - name: Run real API PHPUnit unit tests on isolated Laravel 12 candidate
         env:
           APP_ENV: testing
@@ -254,6 +281,24 @@ jobs:
           export APP_KEY="$(php -r 'echo "base64:".base64_encode(random_bytes(32));')"
           vendor/bin/phpunit -c phpunit.xml --testsuite Unit --colors=never
           echo "LARAVEL12_API_UNIT_TESTS=PASS"
+
+      - name: Run real Laravel 12 API feature health endpoints against in-memory SQLite
+        env:
+          APP_ENV: testing
+          APP_URL: http://localhost.test
+          DB_CONNECTION: sqlite
+          DB_DATABASE: ':memory:'
+          CACHE_STORE: array
+          CACHE_DRIVER: array
+          MAIL_MAILER: array
+          QUEUE_CONNECTION: sync
+          SESSION_DRIVER: array
+          LOG_CHANNEL: stderr
+          TELESCOPE_ENABLED: 'false'
+        run: |
+          export APP_KEY="$(php -r 'echo "base64:".base64_encode(random_bytes(32));')"
+          vendor/bin/phpunit -c phpunit.xml --testsuite Feature --colors=never
+          echo "LARAVEL12_API_FEATURE_HEALTH_TESTS=PASS"
 
       - name: Upload ONLY diagnostic output (no composer.lock)
         if: ${{ always() }}
