@@ -201,6 +201,60 @@ jobs:
           PY
           COMPOSER_NO_AUDIT=0 composer audit --locked --format=plain
 
+      - name: Install audited candidate dependencies in disposable runner (scripts/plugins disabled)
+        run: |
+          test -s composer.lock
+          composer validate --no-check-publish
+          COMPOSER_NO_AUDIT=0 composer install --prefer-dist --no-scripts --no-plugins \
+            --no-progress --no-interaction --optimize-autoloader
+          echo "LARAVEL12_EPHEMERAL_INSTALL=PASS"
+
+      - name: Validate real PHP autoload and Laravel 12 class contracts
+        run: |
+          php <<'PHP'
+          <?php
+          declare(strict_types=1);
+          require 'vendor/autoload.php';
+          $required = [
+              \\Illuminate\\Foundation\\Application::class,
+              \\Fleetbase\\Support\\PushNotification::class,
+              \\Fleetbase\\FleetOps\\Support\\Geocoding::class,
+              \\Geocoder\\Laravel\\Http\\LaravelHttpClient::class,
+              \\AaronFrancis\\FastPaginate\\FastPaginateProvider::class,
+          ];
+          foreach ($required as $name) {
+              if (!class_exists($name)) {
+                  fwrite(STDERR, "STOP=RUNTIME_CLASS_NOT_FOUND:".$name."\\n");
+                  exit(2);
+              }
+          }
+          if (!str_starts_with(\\Illuminate\\Foundation\\Application::VERSION, '12.')) {
+              fwrite(STDERR, "STOP=UNEXPECTED_FRAMEWORK_MAJOR\\n"); exit(2);
+          }
+          if (!is_subclass_of(\\Geocoder\\Laravel\\Http\\LaravelHttpClient::class, \\Psr\\Http\\Client\\ClientInterface::class)) {
+              fwrite(STDERR, "STOP=GEOCODER_NOT_PSR18\\n"); exit(2);
+          }
+          echo "LARAVEL12_AUTOLOAD_SMOKE=PASS_FRAMEWORK_AND_FORKS\\n";
+          PHP
+
+      - name: Run real API PHPUnit unit tests on isolated Laravel 12 candidate
+        env:
+          APP_ENV: testing
+          APP_URL: http://localhost.test
+          DB_CONNECTION: sqlite
+          DB_DATABASE: ':memory:'
+          CACHE_STORE: array
+          CACHE_DRIVER: array
+          MAIL_MAILER: array
+          QUEUE_CONNECTION: sync
+          SESSION_DRIVER: array
+          LOG_CHANNEL: stderr
+          TELESCOPE_ENABLED: 'false'
+        run: |
+          export APP_KEY="$(php -r 'echo "base64:".base64_encode(random_bytes(32));')"
+          vendor/bin/phpunit -c phpunit.xml --testsuite Unit --colors=never
+          echo "LARAVEL12_API_UNIT_TESTS=PASS"
+
       - name: Upload ONLY diagnostic output (no composer.lock)
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
