@@ -437,6 +437,17 @@ jobs:
         run: |
           export APP_KEY="$(php -r 'echo "base64:".base64_encode(random_bytes(32));')"
           php -r '$db=new PDO("mysql:host=127.0.0.1;port=3306;dbname=gst_f8d3_probe","root",""); echo "MYSQL8_DISPOSABLE_CONNECTION=PASS\n";'
+          # Sanctum4 publishes rather than auto-registers its base migration.
+          # Copy the official audited vendor file for this throwaway DB replay ONLY.
+          # The permanent, version-controlled migration is NOT part of this experiment.
+          sanctum_migration="vendor/laravel/sanctum/database/migrations/2019_12_14_000001_create_personal_access_tokens_table.php"
+          target_migration="database/migrations/2019_12_14_000001_create_personal_access_tokens_table.php"
+          test -s "$sanctum_migration" && test ! -e "$target_migration"
+          grep -q "Schema::create('personal_access_tokens'" "$sanctum_migration"
+          mkdir -p database/migrations
+          cp "$sanctum_migration" "$target_migration"
+          echo "SANCTUM4_MIGRATION_SOURCE=OFFICIAL_VENDOR_PACKAGE_EPHEMERAL_ONLY"
+          echo "SANCTUM4_EARLY_MIGRATION=PREPARED_NO_PRODUCT_PATCH"
           if ! php artisan migrate --force --no-interaction --no-ansi > "$RUNNER_TEMP/gst-f8d3-migrate.log" 2>&1; then
             echo "STOP=LARAVEL12_MYSQL8_MIGRATIONS_FAILED"
             tail -n 75 "$RUNNER_TEMP/gst-f8d3-migrate.log"
