@@ -437,6 +437,21 @@ jobs:
         run: |
           export APP_KEY="$(php -r 'echo "base64:".base64_encode(random_bytes(32));')"
           php -r '$db=new PDO("mysql:host=127.0.0.1;port=3306;dbname=gst_f8d3_probe","root",""); echo "MYSQL8_DISPOSABLE_CONNECTION=PASS\n";'
+          # Match Core API sandbox and Storefront storefront connection databases.
+          # All databases exist solely in the GitHub Actions disposable MySQL service.
+          php <<'PHP'
+          <?php
+          declare(strict_types=1);
+          $db = new PDO(
+              'mysql:host=127.0.0.1;port=3306;dbname=gst_f8d3_probe',
+              'root', '',
+              [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
+          );
+          foreach (['gst_f8d3_probe_sandbox', 'gst_f8d3_probe_storefront'] as $name) {
+              $db->exec("CREATE DATABASE ".$name." CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+              echo "MYSQL8_DISPOSABLE_DB_READY=".$name."\n";
+          }
+          PHP
           # Sanctum4 publishes rather than auto-registers its base migration.
           # Copy the official audited vendor file for this throwaway DB replay ONLY.
           # The permanent, version-controlled migration is NOT part of this experiment.
