@@ -246,6 +246,47 @@ jobs:
             echo "COLLISION8_HYPOTHESIS=COMPOSER_ONLY_PASS_CODE_UNTESTED_NO_GO"
           fi
 
+
+      - name: Probe validated upstream Barcode 12 Spatial 2 and Sanctum 4 dependency ranges
+        run: |
+          # This changes only synthetic Composer metadata inside the disposable runner.
+          # It does NOT establish any binary/API compatibility of those packages.
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          p=Path(os.environ["RUNNER_TEMP"])/"gst-f8d2-core-hypothetical"/"composer.json"
+          pkg=json.loads(p.read_text())
+          updates={
+              "milon/barcode":("^10.0","^12.0"),
+              "fleetbase/laravel-mysql-spatial":("^1.0.3","^2.0.0"),
+              "laravel/sanctum":("3.2.4","^4.0"),
+          }
+          for name, (expected, target) in updates.items():
+              if pkg["require"].get(name) != expected:
+                  raise SystemExit("STOP=HYPOTHESIS_BASELINE_MISMATCH:"+name)
+              pkg["require"][name]=target
+          p.write_text(json.dumps(pkg, indent=2)+"\n")
+          print("ADDITIONAL_CORE_METADATA_CHANGES=3_TARGETS_ONLY")
+          print("HYPOTHESIS_ONLY_NO_PRODUCT_CODE=PASS")
+          PY
+          set +e
+          composer update laravel/framework fleetbase/core-api fleetbase/countries \
+            nesbot/carbon pragmarx/ia-collection pragmarx/coollection \
+            nunomaduro/collision nunomaduro/termwind \
+            milon/barcode fleetbase/laravel-mysql-spatial laravel/sanctum \
+            --with-all-dependencies --dry-run --no-plugins --no-scripts \
+            --no-progress --no-interaction --prefer-dist \
+            > "$RUNNER_TEMP/f8d2-upstream-patch-targets.txt" 2>&1
+          rc=$?
+          set -e
+          echo "CORE_3_PACKAGES_HYPOTHESIS_SOLVER_RC=$rc"
+          sed -n '1,200p' "$RUNNER_TEMP/f8d2-upstream-patch-targets.txt"
+          if [ "$rc" -ne 0 ]; then
+            echo "CORE_3_PACKAGES_HYPOTHESIS=NEXT_BLOCKERS_REMAIN_NO_GO"
+          else
+            echo "CORE_3_PACKAGES_HYPOTHESIS=COMPOSER_ONLY_PASS_CODE_UNTESTED_NO_GO"
+          fi
+
       - name: Upload diagnostics without publishing any deployable lock
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
@@ -260,6 +301,7 @@ jobs:
             ${{ runner.temp }}/f8d2-core-available.json
             ${{ runner.temp }}/f8d2-carbon-explicit-solver.txt
             ${{ runner.temp }}/f8d2-collision8-solver.txt
+            ${{ runner.temp }}/f8d2-upstream-patch-targets.txt
           if-no-files-found: warn
           retention-days: 7
 
