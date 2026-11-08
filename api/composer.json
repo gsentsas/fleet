@@ -22,7 +22,7 @@
         "appstract/laravel-opcache": "^4.0",
         "fleetbase/core-api": "^1.6.74",
         "fleetbase/ai": "^0.0.5",
-        "fleetbase/fleetops-api": "^0.6.75",
+        "fleetbase/fleetops-api": "dev-security/gstfleet-webhook-auth-v075#b1f43dec2934ba83225c940f1442bd4d886b0f32 as 0.6.75",
         "fleetbase/registry-bridge": "^0.1.11",
         "fleetbase/customer-portal-api": "^0.0.16",
         "fleetbase/storefront-api": "^0.4.31",
@@ -54,6 +54,14 @@
         "phpunit/phpunit": "^10.0"
     },
     "repositories": [
+        {
+            "type": "vcs",
+            "url": "https://github.com/gsentsas/fleetops",
+            "canonical": true,
+            "only": [
+                "fleetbase/fleetops-api"
+            ]
+        },
         {
             "type": "composer",
             "url": "https://registry.fleetbase.io",
