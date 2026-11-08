@@ -173,6 +173,7 @@ jobs:
           python3 - <<'PY'
           import json
           from pathlib import Path
+          from urllib.parse import urlsplit
           lock=json.loads(Path("composer.lock").read_text())
           packages={p["name"]:p for p in lock.get("packages",[])}
           pins={
@@ -180,13 +181,25 @@ jobs:
               "fleetbase/storefront-api":("https://github.com/gsentsas/storefront.git","5e5d0f06102005442db37d817396533df2db8300"),
               "fleetbase/fleetops-api":("https://github.com/gsentsas/fleetops.git","3573ddc1ebffeaf54685e0f8c5df34dda234122f"),
           }
+          def public_repo_path(value):
+              try:
+                  p=urlsplit(value)
+                  if p.scheme!="https" or p.hostname!="github.com" or p.username or p.password or p.port or p.query or p.fragment:
+                      return None
+                  return p.path.strip("/").removesuffix(".git").lower()
+              except (ValueError, TypeError):
+                  return None
           for name,(url,sha) in pins.items():
               entry=packages.get(name)
-              if entry is None or entry.get("source",{}).get("url")!=url or entry.get("source",{}).get("reference")!=sha:
+              source=entry.get("source",{}) if entry else {}
+              actual_path=public_repo_path(source.get("url",""))
+              actual_ref=source.get("reference")
+              print("FORK_CANDIDATE="+name+" path="+str(actual_path or "INVALID")+" ref="+str(actual_ref or "MISSING"))
+              if actual_path!=public_repo_path(url) or actual_ref!=sha:
                   raise SystemExit("STOP=UNPINNED_FORK:"+name)
           print("ALL_THREE_FORKS_PINNED=PASS_EXACT_SHAS")
           PY
-          composer audit --locked --format=plain
+          COMPOSER_NO_AUDIT=0 composer audit --locked --format=plain
 
       - name: Upload ONLY diagnostic output (no composer.lock)
         if: ${{ always() }}
