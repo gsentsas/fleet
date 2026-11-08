@@ -77,10 +77,94 @@ jobs:
           echo "LARAVEL12_SOLVER_RC=$rc"
           sed -n '1,220p' "$RUNNER_TEMP/f8d2-laravel12-solver.txt"
           if [ "$rc" -ne 0 ]; then
-            echo "LARAVEL12_SOLVER=BLOCKED_NO_GO"
-            exit "$rc"
+            echo "LARAVEL12_SOLVER=BLOCKED_EXPECTED_NO_GO"
+          else
+            echo "LARAVEL12_SOLVER=RESOLVED_UNTESTED_NO_GO"
           fi
-          echo "LARAVEL12_SOLVER=RESOLVED_DIAGNOSTIC_ONLY_NO_GO"
+
+
+      - name: Create hypothetical Core API metadata compatible with Countries 0.9 and Illuminate 12
+        run: |
+          # Composer metadata ONLY: no Core API code or validation tests are modified.
+          # This is a counterfactual compatibility probe, NOT an actual library upgrade.
+          python3 <<'PY'
+          import copy, json, os
+          from pathlib import Path
+
+          lock = json.loads(Path("composer.lock").read_text())
+          pkgs = [p for p in lock["packages"] if p["name"] == "fleetbase/core-api"]
+          if len(pkgs) != 1 or pkgs[0]["version"] != "1.6.74":
+              raise SystemExit("STOP=UNEXPECTED_CORE_API_PACKAGE")
+          core = copy.deepcopy(pkgs[0])
+          requirements = copy.deepcopy(core["require"])
+          if requirements.get("fleetbase/countries") != "^0.8.3":
+              raise SystemExit("STOP=UNEXPECTED_COUNTRIES_CONSTRAINT")
+          keys = (
+              "illuminate/broadcasting",
+              "illuminate/contracts",
+              "illuminate/database",
+              "illuminate/http",
+              "illuminate/notifications",
+              "illuminate/routing",
+              "illuminate/support",
+          )
+          for key in keys:
+              if requirements.get(key) != "^9.0|^10.0":
+                  raise SystemExit("STOP=UNEXPECTED_CORE_ILLUMINATE_CONSTRAINT:" + key)
+              requirements[key] = "^12.0"
+          requirements["fleetbase/countries"] = "^0.9.0"
+          candidate = {
+              "name": "fleetbase/core-api",
+              "version": "1.6.74",
+              "type": "library",
+              "description": "METADATA-ONLY CI PROBE: NOT A DEPLOYABLE CORE API",
+              "require": requirements,
+          }
+          temp = Path(os.environ["RUNNER_TEMP"]) / "gst-f8d2-core-hypothetical"
+          temp.mkdir(parents=True, exist_ok=True)
+          (temp / "composer.json").write_text(json.dumps(candidate, indent=2) + "\n")
+          manifest_path = Path("composer.json")
+          manifest = json.loads(manifest_path.read_text())
+          if manifest["require"].get("laravel/framework") != "^12.69.2":
+              raise SystemExit("STOP=UNEXPECTED_LARAVEL_TARGET")
+          manifest["repositories"] = [
+              {
+                  "type": "path",
+                  "url": str(temp),
+                  "canonical": True,
+                  "options": {"versions": {"fleetbase/core-api": "1.6.74"}},
+                  "only": ["fleetbase/core-api"],
+              },
+              {
+                  "type": "vcs",
+                  "url": "https://github.com/fleetbase/countries",
+                  "canonical": True,
+                  "only": ["fleetbase/countries"],
+              },
+          ] + manifest.get("repositories", [])
+          manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+          print("CORE_METADATA_ONLY_TEST=YES")
+          print("COUNTRIES_REQUIREMENT=0.9.0")
+          print("CORE_ILLUMINATE_REQUIREMENTS_PROBED=7_OF_7")
+          print("CORE_PRODUCT_CODE_MODIFIED=NO")
+          PY
+
+      - name: Run second solve against hypothetical Core API + real Countries 0.9
+        run: |
+          set +e
+          composer update laravel/framework fleetbase/core-api fleetbase/countries \
+            --with-all-dependencies --dry-run --no-plugins --no-scripts \
+            --no-progress --no-interaction --prefer-dist \
+            > "$RUNNER_TEMP/f8d2-core-countries-solver.txt" 2>&1
+          rc=$?
+          set -e
+          echo "CORE_COUNTRIES_HYPOTHESIS_SOLVER_RC=$rc"
+          sed -n '1,220p' "$RUNNER_TEMP/f8d2-core-countries-solver.txt"
+          if [ "$rc" -ne 0 ]; then
+            echo "CORE_COUNTRIES_HYPOTHESIS=BLOCKED_BY_OTHER_CONSTRAINTS_NO_GO"
+          else
+            echo "CORE_COUNTRIES_HYPOTHESIS=SOLVER_ONLY_PASS_CODE_UNTESTED_NO_GO"
+          fi
 
       - name: Upload diagnostics without publishing any deployable lock
         if: ${{ always() }}
@@ -90,8 +174,15 @@ jobs:
           path: |
             ${{ runner.temp }}/f8d2-locked-prohibits.txt
             ${{ runner.temp }}/f8d2-laravel12-solver.txt
+            ${{ runner.temp }}/f8d2-core-countries-solver.txt
           if-no-files-found: warn
           retention-days: 7
+
+      - name: Keep metadata-only compatibility experiments NON-RELEASABLE
+        run: |
+          echo "CORE_API_CODE_COMPATIBILITY=UNVERIFIED"
+          echo "P0_F8D2_SECURITY_DECISION=NO_GO"
+          exit 1
 
   baseline-security-audit:
     name: Baseline Composer audit (MUST remain blocking)
