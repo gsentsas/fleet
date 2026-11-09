@@ -88,7 +88,7 @@ jobs:
           m["require"]["laravel/framework"]="^12.69.2"
           m["require"]["fleetbase/core-api"]="dev-compat/p0-f8d3-r10-index-guard#1b24680edf48eee7fd5988aac89f20b9f965eaa8 as 1.6.74"
           m["require"]["fleetbase/storefront-api"]="dev-compat/p0-f8d3-laravel12-foundation#5e5d0f06102005442db37d817396533df2db8300 as 0.4.31"
-          m["require"]["fleetbase/fleetops-api"]="dev-compat/p0-f8d3-laravel12-barcode#3573ddc1ebffeaf54685e0f8c5df34dda234122f as 0.6.75"
+          m["require"]["fleetbase/fleetops-api"]="dev-compat/p0-f8d3-r11-unsigned-decimal#665e4fdf16f0344a24a273ebd1599b92ba6c2728 as 0.6.75"
           if m["require-dev"].get("nunomaduro/collision")!="^7.0":
               raise SystemExit("STOP=COLLISION_EXPECTED_7")
           if m["require-dev"].get("phpunit/phpunit")!="^10.0":
@@ -135,7 +135,7 @@ jobs:
           done <<'REVISIONS'
           gsentsas/core-api 1b24680edf48eee7fd5988aac89f20b9f965eaa8
           gsentsas/storefront 5e5d0f06102005442db37d817396533df2db8300
-          gsentsas/fleetops 3573ddc1ebffeaf54685e0f8c5df34dda234122f
+          gsentsas/fleetops 665e4fdf16f0344a24a273ebd1599b92ba6c2728
           geocoder-php/GeocoderLaravel 13.2.2
           REVISIONS
           rate=$(curl -sS --max-time 20 -H "Authorization: Bearer $GH_JOB_TOKEN" \
@@ -192,7 +192,7 @@ jobs:
           pins={
               "fleetbase/core-api":("https://github.com/gsentsas/core-api.git","1b24680edf48eee7fd5988aac89f20b9f965eaa8"),
               "fleetbase/storefront-api":("https://github.com/gsentsas/storefront.git","5e5d0f06102005442db37d817396533df2db8300"),
-              "fleetbase/fleetops-api":("https://github.com/gsentsas/fleetops.git","3573ddc1ebffeaf54685e0f8c5df34dda234122f"),
+              "fleetbase/fleetops-api":("https://github.com/gsentsas/fleetops.git","665e4fdf16f0344a24a273ebd1599b92ba6c2728"),
           }
           def public_repo_path(value):
               try:
@@ -467,6 +467,10 @@ jobs:
           foreach ($pdo->query("SELECT table_schema AS sch, table_name AS tbl FROM information_schema.tables WHERE table_schema IN ($in) ORDER BY 1, 2") as $r) {
               $lines[] = 'T '.$strip($r['sch']).'.'.$r['tbl'];
           }
+          // Real column metadata, in physical column order (R11: unsigned decimals, nullability, defaults, collations).
+          foreach ($pdo->query("SELECT table_schema AS sch, table_name AS tbl, column_name AS col, column_type AS ctype, is_nullable AS nul, column_default AS dflt, collation_name AS coll FROM information_schema.columns WHERE table_schema IN ($in) ORDER BY table_schema, table_name, ordinal_position") as $r) {
+              $lines[] = 'C '.$strip($r['sch']).'.'.$r['tbl'].'.'.$r['col'].' '.$r['ctype'].' null='.$r['nul'].' default='.($r['dflt'] ?? 'NULL').' coll='.($r['coll'] ?? '-');
+          }
           $indexes = $pdo->query("SELECT table_schema AS sch, table_name AS tbl, index_name AS idx, non_unique AS nu, GROUP_CONCAT(column_name ORDER BY seq_in_index) AS cols FROM information_schema.statistics WHERE table_schema IN ($in) GROUP BY 1, 2, 3, 4 ORDER BY 1, 2, 3")->fetchAll(PDO::FETCH_ASSOC);
           foreach ($indexes as $r) {
               $lines[] = 'I '.$strip($r['sch']).'.'.$r['tbl'].'.'.$r['idx'].'('.$r['cols'].')'.($r['nu'] ? '' : ' unique');
@@ -485,16 +489,38 @@ jobs:
               'F DB.company_users.company_users_user_uuid_foreign(user_uuid)->DB.users(uuid) NO ACTION/NO ACTION',
               'F DB.company_users.company_users_company_uuid_foreign(company_uuid)->DB.companies(uuid) NO ACTION/NO ACTION',
               'M 2024_11_28_000001_add_performance_indexes',
+              // R11: the four capacity migrations ran; the surviving column keeps decimal(10,3) unsigned NULL.
+              'M 2026_04_08_000001_add_orchestrator_columns_to_vehicles_table',
+              'M 2026_04_08_000004_add_orchestrator_columns_to_payloads_table',
+              'M 2026_04_14_000001_drop_redundant_capacity_columns_from_payloads_table',
+              'M 2026_04_14_000002_rename_capacity_columns_on_vehicles_table',
+              'C DB.vehicles.payload_capacity_volume decimal(10,3) unsigned null=YES default=NULL coll=-',
+              'C DB.vehicles.payload_capacity_pallets int unsigned null=YES default=NULL coll=-',
+              'C DB.vehicles.payload_capacity_parcels int unsigned null=YES default=NULL coll=-',
+              // Durable anti-replay ledger (gsentsas/fleetops a9655606): table, tenant-scoped key, byte-exact tokens.
+              'M 2026_11_08_000001_create_telematic_webhook_receipts_table',
+              'I DB.telematic_webhook_receipts.PRIMARY(scope_hash,receipt_key) unique',
+              'I DB.telematic_webhook_receipts.telematic_receipt_reconcile_idx(status,lease_expires_at)',
+              'C DB.telematic_webhook_receipts.scope_hash varchar(64) null=NO default=NULL coll=ascii_bin',
+              'C DB.telematic_webhook_receipts.receipt_key varchar(64) null=NO default=NULL coll=ascii_bin',
+              'C DB.telematic_webhook_receipts.claim_token varchar(64) null=NO default=NULL coll=ascii_bin',
+              'C DB.telematic_webhook_receipts.lease_expires_at datetime null=NO default=NULL coll=-',
           ];
           foreach ($must as $needle) {
               if (!in_array($needle, $lines, true)) { fwrite(STDERR, "STOP=MYSQL8_SCHEMA_MISSING:".$needle."\n"); exit(2); }
           }
+          // Columns dropped by 2026_04_14_* must be gone on a fresh install.
+          foreach (['C DB.vehicles.capacity_weight_kg ', 'C DB.vehicles.capacity_volume_m3 ', 'C DB.payloads.capacity_weight_kg ', 'C DB.payloads.capacity_volume_m3 ', 'C DB.payloads.capacity_pallets ', 'C DB.payloads.capacity_parcels '] as $prefix) {
+              foreach ($lines as $l) {
+                  if (str_starts_with($l, $prefix)) { fwrite(STDERR, "STOP=MYSQL8_STALE_COLUMN:".$l."\n"); exit(2); }
+              }
+          }
           if (count($migrations) !== count(array_unique($migrations))) { fwrite(STDERR, "STOP=MYSQL8_DUPLICATE_MIGRATION_ROWS\n"); exit(2); }
           $count = static fn (string $p): int => count(array_filter($lines, static fn ($l) => str_starts_with($l, $p)));
           file_put_contents(getenv('RUNNER_TEMP').'/gst-schema-'.$db.'.txt', implode("\n", $lines)."\n");
-          echo "MYSQL8_SCHEMA=".$db." tables=".$count('T ')." indexes=".$count('I ')." foreign_keys=".$count('F ')." migrations=".count($migrations)." sha256=".hash('sha256', implode("\n", $lines))."\n";
+          echo "MYSQL8_SCHEMA=".$db." tables=".$count('T ')." columns=".$count('C ')." indexes=".$count('I ')." foreign_keys=".$count('F ')." migrations=".count($migrations)." sha256=".hash('sha256', implode("\n", $lines))."\n";
           PHP
-          for db in gst_f8d3_r10_a gst_f8d3_r10_b gst_f8d3_r10_c; do
+          for db in gst_f8d3_r11_a gst_f8d3_r11_b gst_f8d3_r11_c; do
             php "$RUNNER_TEMP/gst-schema-check.php" "$db" create
             if ! DB_DATABASE="$db" php artisan migrate --force --no-interaction --no-ansi > "$RUNNER_TEMP/gst-f8d3-migrate-$db.log" 2>&1; then
               echo "STOP=LARAVEL12_MYSQL8_MIGRATIONS_FAILED:$db"
@@ -504,21 +530,54 @@ jobs:
             echo "LARAVEL12_MYSQL8_MIGRATIONS=PASS:$db"
             php "$RUNNER_TEMP/gst-schema-check.php" "$db" check
           done
-          for db in gst_f8d3_r10_b gst_f8d3_r10_c; do
-            if ! cmp -s "$RUNNER_TEMP/gst-schema-gst_f8d3_r10_a.txt" "$RUNNER_TEMP/gst-schema-$db.txt"; then
+          for db in gst_f8d3_r11_b gst_f8d3_r11_c; do
+            if ! cmp -s "$RUNNER_TEMP/gst-schema-gst_f8d3_r11_a.txt" "$RUNNER_TEMP/gst-schema-$db.txt"; then
               echo "STOP=MYSQL8_SCHEMA_NOT_DETERMINISTIC:$db"
-              diff "$RUNNER_TEMP/gst-schema-gst_f8d3_r10_a.txt" "$RUNNER_TEMP/gst-schema-$db.txt" | head -n 40
+              diff "$RUNNER_TEMP/gst-schema-gst_f8d3_r11_a.txt" "$RUNNER_TEMP/gst-schema-$db.txt" | head -n 40
               exit 2
             fi
           done
           echo "MYSQL8_SCHEMA_IDENTICAL_ACROSS_3_FRESH_DBS=PASS"
-          DB_DATABASE=gst_f8d3_r10_a php artisan migrate --force --no-interaction --no-ansi > "$RUNNER_TEMP/gst-f8d3-migrate-rerun.log" 2>&1
+          DB_DATABASE=gst_f8d3_r11_a php artisan migrate --force --no-interaction --no-ansi > "$RUNNER_TEMP/gst-f8d3-migrate-rerun.log" 2>&1
           grep -q "Nothing to migrate" "$RUNNER_TEMP/gst-f8d3-migrate-rerun.log"
-          cp "$RUNNER_TEMP/gst-schema-gst_f8d3_r10_a.txt" "$RUNNER_TEMP/gst-schema-before-rerun.txt"
-          php "$RUNNER_TEMP/gst-schema-check.php" gst_f8d3_r10_a check
-          cmp -s "$RUNNER_TEMP/gst-schema-before-rerun.txt" "$RUNNER_TEMP/gst-schema-gst_f8d3_r10_a.txt"
+          cp "$RUNNER_TEMP/gst-schema-gst_f8d3_r11_a.txt" "$RUNNER_TEMP/gst-schema-before-rerun.txt"
+          php "$RUNNER_TEMP/gst-schema-check.php" gst_f8d3_r11_a check
+          cmp -s "$RUNNER_TEMP/gst-schema-before-rerun.txt" "$RUNNER_TEMP/gst-schema-gst_f8d3_r11_a.txt"
           echo "MYSQL8_MIGRATE_RERUN_IDEMPOTENT=PASS"
           echo "LARAVEL12_MYSQL8_MIGRATIONS=PASS_3_FRESH_DBS"
+
+      # The Composer dist of FleetOps excludes /scripts (export-ignore), so the ledger
+      # bench is read from the same pinned commit; no credentials are persisted.
+      - name: Fetch FleetOps source at the pinned SHA (read-only, ledger bench only)
+        uses: actions/checkout@v4
+        with:
+          repository: gsentsas/fleetops
+          ref: 665e4fdf16f0344a24a273ebd1599b92ba6c2728
+          path: gst-fleetops-src
+          persist-credentials: false
+
+      - name: Race the real anti-replay ledger on Laravel 12 and the disposable MySQL 8 service
+        run: |
+          set -euo pipefail
+          src="$GITHUB_WORKSPACE/gst-fleetops-src"
+          test "$(git -C "$src" rev-parse HEAD)" = 665e4fdf16f0344a24a273ebd1599b92ba6c2728
+          # The bench loads the pinned source; it must be byte-identical to what Composer installed.
+          for f in server/src/Support/Telematics/WebhookReplayLedger.php \
+                   server/migrations/2026_11_08_000001_create_telematic_webhook_receipts_table.php; do
+            cmp "$src/$f" "vendor/fleetbase/fleetops-api/$f"
+          done
+          echo "LEDGER_SOURCE_MATCHES_INSTALLED_PACKAGE=PASS"
+          # Creates and drops its own gst_ledger_tmp_* schemas on this job's MySQL service only.
+          rc=0
+          php "$src/scripts/webhook-ledger-race.php" --driver=mysql \
+            --mysql-host=127.0.0.1 --mysql-port=3306 --mysql-user=root \
+            --autoload="$PWD/vendor/autoload.php" > "$RUNNER_TEMP/gst-f8d3-ledger-race-mysql.log" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/gst-f8d3-ledger-race-mysql.log"
+          if [ "$rc" -ne 0 ]; then echo "STOP=LEDGER_RACE_BENCH_FAILED:rc=$rc"; exit 2; fi
+          grep -q '^LARAVEL_VERSION=12\.' "$RUNNER_TEMP/gst-f8d3-ledger-race-mysql.log"
+          grep -qx 'FAILED_CHECKS=NONE' "$RUNNER_TEMP/gst-f8d3-ledger-race-mysql.log"
+          grep -qx 'LEDGER_RACE_BENCH_MYSQL=PASS' "$RUNNER_TEMP/gst-f8d3-ledger-race-mysql.log"
+          echo "LARAVEL12_MYSQL8_ANTI_REPLAY_LEDGER=PASS"
 
       - name: Upload ONLY diagnostic output (no composer.lock)
         if: ${{ always() }}
@@ -530,6 +589,7 @@ jobs:
             ${{ runner.temp }}/gst-f8d3-solver-rc.txt
             ${{ runner.temp }}/gst-schema-*.txt
             ${{ runner.temp }}/gst-f8d3-migrate-*.log
+            ${{ runner.temp }}/gst-f8d3-ledger-race-*.log
           retention-days: 7
           if-no-files-found: warn
 
