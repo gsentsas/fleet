@@ -86,7 +86,7 @@ jobs:
           if m.get("config",{}).get("policy",{}).get("advisories"):
               raise SystemExit("STOP=ROOT_POLICY_UNEXPECTED")
           m["require"]["laravel/framework"]="^12.69.2"
-          m["require"]["fleetbase/core-api"]="dev-compat/p0-f8d3-laravel12-foundation#6193fb52c7f93c658a4afc337a62893236509c63 as 1.6.74"
+          m["require"]["fleetbase/core-api"]="dev-compat/p0-f8d3-r10-index-guard#1b24680edf48eee7fd5988aac89f20b9f965eaa8 as 1.6.74"
           m["require"]["fleetbase/storefront-api"]="dev-compat/p0-f8d3-laravel12-foundation#5e5d0f06102005442db37d817396533df2db8300 as 0.4.31"
           m["require"]["fleetbase/fleetops-api"]="dev-compat/p0-f8d3-laravel12-barcode#3573ddc1ebffeaf54685e0f8c5df34dda234122f as 0.6.75"
           if m["require-dev"].get("nunomaduro/collision")!="^7.0":
@@ -133,7 +133,7 @@ jobs:
               exit 2
             fi
           done <<'REVISIONS'
-          gsentsas/core-api 6193fb52c7f93c658a4afc337a62893236509c63
+          gsentsas/core-api 1b24680edf48eee7fd5988aac89f20b9f965eaa8
           gsentsas/storefront 5e5d0f06102005442db37d817396533df2db8300
           gsentsas/fleetops 3573ddc1ebffeaf54685e0f8c5df34dda234122f
           geocoder-php/GeocoderLaravel 13.2.2
@@ -190,7 +190,7 @@ jobs:
           lock=json.loads(Path("composer.lock").read_text())
           packages={p["name"]:p for p in lock.get("packages",[])}
           pins={
-              "fleetbase/core-api":("https://github.com/gsentsas/core-api.git","6193fb52c7f93c658a4afc337a62893236509c63"),
+              "fleetbase/core-api":("https://github.com/gsentsas/core-api.git","1b24680edf48eee7fd5988aac89f20b9f965eaa8"),
               "fleetbase/storefront-api":("https://github.com/gsentsas/storefront.git","5e5d0f06102005442db37d817396533df2db8300"),
               "fleetbase/fleetops-api":("https://github.com/gsentsas/fleetops.git","3573ddc1ebffeaf54685e0f8c5df34dda234122f"),
           }
@@ -417,14 +417,13 @@ jobs:
           print("LARAVEL12_ROUTE_COUNT="+str(len(routes)))
           PY
 
-      - name: Replay all Laravel 12 package migrations against disposable MySQL 8
+      - name: Replay all Laravel 12 package migrations against three fresh disposable MySQL 8 databases
         env:
           APP_ENV: testing
           APP_URL: http://localhost.test
           DB_CONNECTION: mysql
           DB_HOST: 127.0.0.1
           DB_PORT: '3306'
-          DB_DATABASE: gst_f8d3_probe
           DB_USERNAME: root
           DB_PASSWORD: ''
           CACHE_STORE: array
@@ -436,22 +435,6 @@ jobs:
           TELESCOPE_ENABLED: 'false'
         run: |
           export APP_KEY="$(php -r 'echo "base64:".base64_encode(random_bytes(32));')"
-          php -r '$db=new PDO("mysql:host=127.0.0.1;port=3306;dbname=gst_f8d3_probe","root",""); echo "MYSQL8_DISPOSABLE_CONNECTION=PASS\n";'
-          # Match Core API sandbox and Storefront storefront connection databases.
-          # All databases exist solely in the GitHub Actions disposable MySQL service.
-          php <<'PHP'
-          <?php
-          declare(strict_types=1);
-          $db = new PDO(
-              'mysql:host=127.0.0.1;port=3306;dbname=gst_f8d3_probe',
-              'root', '',
-              [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
-          );
-          foreach (['gst_f8d3_probe_sandbox', 'gst_f8d3_probe_storefront'] as $name) {
-              $db->exec("CREATE DATABASE ".$name." CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
-              echo "MYSQL8_DISPOSABLE_DB_READY=".$name."\n";
-          }
-          PHP
           # Sanctum4 publishes rather than auto-registers its base migration.
           # Copy the official audited vendor file for this throwaway DB replay ONLY.
           # The permanent, version-controlled migration is NOT part of this experiment.
@@ -462,33 +445,80 @@ jobs:
           mkdir -p database/migrations
           cp "$sanctum_migration" "$target_migration"
           echo "SANCTUM4_MIGRATION_SOURCE=OFFICIAL_VENDOR_PACKAGE_EPHEMERAL_ONLY"
-          echo "SANCTUM4_EARLY_MIGRATION=PREPARED_NO_PRODUCT_PATCH"
-          if ! php artisan migrate --force --no-interaction --no-ansi > "$RUNNER_TEMP/gst-f8d3-migrate.log" 2>&1; then
-            echo "STOP=LARAVEL12_MYSQL8_MIGRATIONS_FAILED"
-            tail -n 75 "$RUNNER_TEMP/gst-f8d3-migrate.log"
-            exit 2
-          fi
-          echo "LARAVEL12_MYSQL8_MIGRATIONS=PASS"
-          php <<'PHP'
+          # Schema check: every database lives only in this job's disposable MySQL service.
+          cat > "$RUNNER_TEMP/gst-schema-check.php" <<'PHP'
           <?php
           declare(strict_types=1);
-          $pdo = new PDO(
-              'mysql:host=127.0.0.1;port=3306;dbname=gst_f8d3_probe',
-              'root', '',
-              [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
-          );
-          $tables = $pdo->query("SHOW TABLES")->fetchAll(PDO::FETCH_COLUMN);
-          if (count($tables) < 100) {
-              fwrite(STDERR, "STOP=MYSQL8_MIGRATION_TABLE_COUNT_UNEXPECTED:".count($tables)."\n");
-              exit(2);
-          }
-          foreach (['users','companies','orders','drivers'] as $table) {
-              if (!in_array($table, $tables, true)) {
-                  fwrite(STDERR, "STOP=MYSQL8_TABLE_MISSING:".$table."\n"); exit(2);
+          [$script, $db, $mode] = $argv + [null, null, 'check'];
+          $pdo = new PDO('mysql:host=127.0.0.1;port=3306', 'root', '', [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+          $schemas = [$db, $db.'_sandbox', $db.'_storefront'];
+          if ($mode === 'create') {
+              foreach ($schemas as $name) {
+                  $exists = $pdo->query("SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = ".$pdo->quote($name))->fetchColumn();
+                  if ((int) $exists !== 0) { fwrite(STDERR, "STOP=MYSQL8_DB_NOT_FRESH:".$name."\n"); exit(2); }
+                  $pdo->exec("CREATE DATABASE `".$name."` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
               }
+              echo "MYSQL8_FRESH_DB_READY=".implode(',', $schemas)."\n";
+              exit(0);
           }
-          echo "LARAVEL12_MYSQL8_TABLES=PASS_COUNT_".count($tables)."\n";
+          $in = implode(',', array_map([$pdo, 'quote'], $schemas));
+          $strip = static fn (string $s): string => preg_replace('/^'.preg_quote($db, '/').'/', 'DB', $s);
+          $lines = [];
+          foreach ($pdo->query("SELECT table_schema AS sch, table_name AS tbl FROM information_schema.tables WHERE table_schema IN ($in) ORDER BY 1, 2") as $r) {
+              $lines[] = 'T '.$strip($r['sch']).'.'.$r['tbl'];
+          }
+          $indexes = $pdo->query("SELECT table_schema AS sch, table_name AS tbl, index_name AS idx, non_unique AS nu, GROUP_CONCAT(column_name ORDER BY seq_in_index) AS cols FROM information_schema.statistics WHERE table_schema IN ($in) GROUP BY 1, 2, 3, 4 ORDER BY 1, 2, 3")->fetchAll(PDO::FETCH_ASSOC);
+          foreach ($indexes as $r) {
+              $lines[] = 'I '.$strip($r['sch']).'.'.$r['tbl'].'.'.$r['idx'].'('.$r['cols'].')'.($r['nu'] ? '' : ' unique');
+          }
+          $fks = $pdo->query("SELECT k.table_schema AS sch, k.table_name AS tbl, k.constraint_name AS con, GROUP_CONCAT(k.column_name ORDER BY k.ordinal_position) AS cols, k.referenced_table_schema AS rsch, k.referenced_table_name AS rtbl, GROUP_CONCAT(k.referenced_column_name ORDER BY k.ordinal_position) AS rcols, r.update_rule AS ur, r.delete_rule AS dr FROM information_schema.key_column_usage k JOIN information_schema.referential_constraints r ON r.constraint_schema = k.table_schema AND r.constraint_name = k.constraint_name WHERE k.table_schema IN ($in) AND k.referenced_table_name IS NOT NULL GROUP BY 1, 2, 3, 5, 6, 8, 9 ORDER BY 1, 2, 3")->fetchAll(PDO::FETCH_ASSOC);
+          foreach ($fks as $r) {
+              $lines[] = 'F '.$strip($r['sch']).'.'.$r['tbl'].'.'.$r['con'].'('.$r['cols'].')->'.$strip($r['rsch']).'.'.$r['rtbl'].'('.$r['rcols'].') '.$r['ur'].'/'.$r['dr'];
+          }
+          $migrations = $pdo->query("SELECT migration FROM `".$db."`.migrations ORDER BY migration")->fetchAll(PDO::FETCH_COLUMN);
+          foreach ($migrations as $m) { $lines[] = 'M '.$m; }
+          $must = [
+              'I DB.company_users.company_users_user_uuid_index(user_uuid)',
+              'I DB.company_users.company_users_company_uuid_index(company_uuid)',
+              'I DB.company_users.company_users_user_company_idx(user_uuid,company_uuid,deleted_at)',
+              'I DB.companies.companies_owner_uuid_index(owner_uuid)',
+              'F DB.company_users.company_users_user_uuid_foreign(user_uuid)->DB.users(uuid) NO ACTION/NO ACTION',
+              'F DB.company_users.company_users_company_uuid_foreign(company_uuid)->DB.companies(uuid) NO ACTION/NO ACTION',
+              'M 2024_11_28_000001_add_performance_indexes',
+          ];
+          foreach ($must as $needle) {
+              if (!in_array($needle, $lines, true)) { fwrite(STDERR, "STOP=MYSQL8_SCHEMA_MISSING:".$needle."\n"); exit(2); }
+          }
+          if (count($migrations) !== count(array_unique($migrations))) { fwrite(STDERR, "STOP=MYSQL8_DUPLICATE_MIGRATION_ROWS\n"); exit(2); }
+          $count = static fn (string $p): int => count(array_filter($lines, static fn ($l) => str_starts_with($l, $p)));
+          file_put_contents(getenv('RUNNER_TEMP').'/gst-schema-'.$db.'.txt', implode("\n", $lines)."\n");
+          echo "MYSQL8_SCHEMA=".$db." tables=".$count('T ')." indexes=".$count('I ')." foreign_keys=".$count('F ')." migrations=".count($migrations)." sha256=".hash('sha256', implode("\n", $lines))."\n";
           PHP
+          for db in gst_f8d3_r10_a gst_f8d3_r10_b gst_f8d3_r10_c; do
+            php "$RUNNER_TEMP/gst-schema-check.php" "$db" create
+            if ! DB_DATABASE="$db" php artisan migrate --force --no-interaction --no-ansi > "$RUNNER_TEMP/gst-f8d3-migrate-$db.log" 2>&1; then
+              echo "STOP=LARAVEL12_MYSQL8_MIGRATIONS_FAILED:$db"
+              tail -n 75 "$RUNNER_TEMP/gst-f8d3-migrate-$db.log"
+              exit 2
+            fi
+            echo "LARAVEL12_MYSQL8_MIGRATIONS=PASS:$db"
+            php "$RUNNER_TEMP/gst-schema-check.php" "$db" check
+          done
+          for db in gst_f8d3_r10_b gst_f8d3_r10_c; do
+            if ! cmp -s "$RUNNER_TEMP/gst-schema-gst_f8d3_r10_a.txt" "$RUNNER_TEMP/gst-schema-$db.txt"; then
+              echo "STOP=MYSQL8_SCHEMA_NOT_DETERMINISTIC:$db"
+              diff "$RUNNER_TEMP/gst-schema-gst_f8d3_r10_a.txt" "$RUNNER_TEMP/gst-schema-$db.txt" | head -n 40
+              exit 2
+            fi
+          done
+          echo "MYSQL8_SCHEMA_IDENTICAL_ACROSS_3_FRESH_DBS=PASS"
+          DB_DATABASE=gst_f8d3_r10_a php artisan migrate --force --no-interaction --no-ansi > "$RUNNER_TEMP/gst-f8d3-migrate-rerun.log" 2>&1
+          grep -q "Nothing to migrate" "$RUNNER_TEMP/gst-f8d3-migrate-rerun.log"
+          cp "$RUNNER_TEMP/gst-schema-gst_f8d3_r10_a.txt" "$RUNNER_TEMP/gst-schema-before-rerun.txt"
+          php "$RUNNER_TEMP/gst-schema-check.php" gst_f8d3_r10_a check
+          cmp -s "$RUNNER_TEMP/gst-schema-before-rerun.txt" "$RUNNER_TEMP/gst-schema-gst_f8d3_r10_a.txt"
+          echo "MYSQL8_MIGRATE_RERUN_IDEMPOTENT=PASS"
+          echo "LARAVEL12_MYSQL8_MIGRATIONS=PASS_3_FRESH_DBS"
 
       - name: Upload ONLY diagnostic output (no composer.lock)
         if: ${{ always() }}
@@ -498,6 +528,8 @@ jobs:
           path: |
             ${{ runner.temp }}/gst-f8d3-real-forks-solver.log
             ${{ runner.temp }}/gst-f8d3-solver-rc.txt
+            ${{ runner.temp }}/gst-schema-*.txt
+            ${{ runner.temp }}/gst-f8d3-migrate-*.log
           retention-days: 7
           if-no-files-found: warn
 
