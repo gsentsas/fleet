@@ -87,7 +87,7 @@ jobs:
               raise SystemExit("STOP=ROOT_POLICY_UNEXPECTED")
           m["require"]["laravel/framework"]="^12.69.2"
           m["require"]["fleetbase/core-api"]="dev-compat/p0-f8d3-r10-index-guard#1b24680edf48eee7fd5988aac89f20b9f965eaa8 as 1.6.74"
-          m["require"]["fleetbase/storefront-api"]="dev-compat/p0-f8d3-laravel12-foundation#5e5d0f06102005442db37d817396533df2db8300 as 0.4.31"
+          m["require"]["fleetbase/storefront-api"]="dev-compat/p0-f8d3-r12-uuid-default#b6d596154370ed5770225d889363a74fab56e584 as 0.4.31"
           m["require"]["fleetbase/fleetops-api"]="dev-compat/p0-f8d3-r11-unsigned-decimal#665e4fdf16f0344a24a273ebd1599b92ba6c2728 as 0.6.75"
           if m["require-dev"].get("nunomaduro/collision")!="^7.0":
               raise SystemExit("STOP=COLLISION_EXPECTED_7")
@@ -134,7 +134,7 @@ jobs:
             fi
           done <<'REVISIONS'
           gsentsas/core-api 1b24680edf48eee7fd5988aac89f20b9f965eaa8
-          gsentsas/storefront 5e5d0f06102005442db37d817396533df2db8300
+          gsentsas/storefront b6d596154370ed5770225d889363a74fab56e584
           gsentsas/fleetops 665e4fdf16f0344a24a273ebd1599b92ba6c2728
           geocoder-php/GeocoderLaravel 13.2.2
           REVISIONS
@@ -191,7 +191,7 @@ jobs:
           packages={p["name"]:p for p in lock.get("packages",[])}
           pins={
               "fleetbase/core-api":("https://github.com/gsentsas/core-api.git","1b24680edf48eee7fd5988aac89f20b9f965eaa8"),
-              "fleetbase/storefront-api":("https://github.com/gsentsas/storefront.git","5e5d0f06102005442db37d817396533df2db8300"),
+              "fleetbase/storefront-api":("https://github.com/gsentsas/storefront.git","b6d596154370ed5770225d889363a74fab56e584"),
               "fleetbase/fleetops-api":("https://github.com/gsentsas/fleetops.git","665e4fdf16f0344a24a273ebd1599b92ba6c2728"),
           }
           def public_repo_path(value):
@@ -215,6 +215,7 @@ jobs:
           COMPOSER_NO_AUDIT=0 composer audit --locked --format=plain
 
       - name: Install audited candidate dependencies in disposable runner (scripts/plugins disabled)
+        id: install
         run: |
           test -s composer.lock
           composer validate --no-check-publish
@@ -505,22 +506,44 @@ jobs:
               'C DB.telematic_webhook_receipts.receipt_key varchar(64) null=NO default=NULL coll=ascii_bin',
               'C DB.telematic_webhook_receipts.claim_token varchar(64) null=NO default=NULL coll=ascii_bin',
               'C DB.telematic_webhook_receipts.lease_expires_at datetime null=NO default=NULL coll=-',
+              // R12 (gsentsas/storefront b6d59615): uuid stays NOT NULL + UNIQUE with no install-time literal default.
+              'C DB_storefront.catalogs.uuid char(36) null=NO default=NULL coll=utf8mb4_unicode_ci',
+              'C DB_storefront.catalog_category_products.uuid char(36) null=NO default=NULL coll=utf8mb4_unicode_ci',
+              'C DB_storefront.food_trucks.uuid char(36) null=NO default=NULL coll=utf8mb4_unicode_ci',
+              'C DB_storefront.catalog_subjects.uuid char(36) null=NO default=NULL coll=utf8mb4_unicode_ci',
+              'C DB_storefront.catalog_hours.uuid char(36) null=NO default=NULL coll=utf8mb4_unicode_ci',
+              'I DB_storefront.catalogs.catalogs_uuid_unique(uuid) unique',
+              'I DB_storefront.catalog_category_products.catalog_category_products_uuid_unique(uuid) unique',
+              'I DB_storefront.food_trucks.food_trucks_uuid_unique(uuid) unique',
+              'I DB_storefront.catalog_subjects.catalog_subjects_uuid_unique(uuid) unique',
+              'I DB_storefront.catalog_hours.catalog_hours_uuid_unique(uuid) unique',
           ];
+          $count = static fn (string $p): int => count(array_filter($lines, static fn ($l) => str_starts_with($l, $p)));
+          // The snapshot is written before the assertions so a failing database can still be compared and diagnosed.
+          file_put_contents(getenv('RUNNER_TEMP').'/gst-schema-'.$db.'.txt', implode("\n", $lines)."\n");
+          echo "MYSQL8_SCHEMA=".$db." tables=".$count('T ')." columns=".$count('C ')." indexes=".$count('I ')." foreign_keys=".$count('F ')." migrations=".count($migrations)." sha256=".hash('sha256', implode("\n", $lines))."\n";
+          $failed = 0;
           foreach ($must as $needle) {
-              if (!in_array($needle, $lines, true)) { fwrite(STDERR, "STOP=MYSQL8_SCHEMA_MISSING:".$needle."\n"); exit(2); }
+              if (!in_array($needle, $lines, true)) { fwrite(STDERR, "STOP=MYSQL8_SCHEMA_MISSING:".$needle."\n"); $failed++; }
           }
           // Columns dropped by 2026_04_14_* must be gone on a fresh install.
           foreach (['C DB.vehicles.capacity_weight_kg ', 'C DB.vehicles.capacity_volume_m3 ', 'C DB.payloads.capacity_weight_kg ', 'C DB.payloads.capacity_volume_m3 ', 'C DB.payloads.capacity_pallets ', 'C DB.payloads.capacity_parcels '] as $prefix) {
               foreach ($lines as $l) {
-                  if (str_starts_with($l, $prefix)) { fwrite(STDERR, "STOP=MYSQL8_STALE_COLUMN:".$l."\n"); exit(2); }
+                  if (str_starts_with($l, $prefix)) { fwrite(STDERR, "STOP=MYSQL8_STALE_COLUMN:".$l."\n"); $failed++; }
               }
           }
-          if (count($migrations) !== count(array_unique($migrations))) { fwrite(STDERR, "STOP=MYSQL8_DUPLICATE_MIGRATION_ROWS\n"); exit(2); }
-          $count = static fn (string $p): int => count(array_filter($lines, static fn ($l) => str_starts_with($l, $p)));
-          file_put_contents(getenv('RUNNER_TEMP').'/gst-schema-'.$db.'.txt', implode("\n", $lines)."\n");
-          echo "MYSQL8_SCHEMA=".$db." tables=".$count('T ')." columns=".$count('C ')." indexes=".$count('I ')." foreign_keys=".$count('F ')." migrations=".count($migrations)." sha256=".hash('sha256', implode("\n", $lines))."\n";
+          // R12: a UUID literal as column default is evaluated once per install (non-deterministic, collides on raw inserts).
+          foreach ($lines as $l) {
+              if (str_starts_with($l, 'C ') && preg_match('/ default=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12} /i', $l)) { fwrite(STDERR, "STOP=MYSQL8_LITERAL_UUID_DEFAULT:".$l."\n"); $failed++; }
+          }
+          if (count($migrations) !== count(array_unique($migrations))) { fwrite(STDERR, "STOP=MYSQL8_DUPLICATE_MIGRATION_ROWS\n"); $failed++; }
+          if ($failed > 0) { fwrite(STDERR, "STOP=MYSQL8_SCHEMA_CHECK_FAILED:".$db." failures=".$failed."\n"); exit(2); }
+          echo "MYSQL8_SCHEMA_CHECK=PASS:".$db."\n";
           PHP
-          for db in gst_f8d3_r11_a gst_f8d3_r11_b gst_f8d3_r11_c; do
+          # A failed replay stops at once. Every later check (schema assertions, determinism, rerun
+          # idempotence) always runs; failures are collected and the step still ends red.
+          fail=""
+          for db in gst_f8d3_r12_a gst_f8d3_r12_b gst_f8d3_r12_c; do
             php "$RUNNER_TEMP/gst-schema-check.php" "$db" create
             if ! DB_DATABASE="$db" php artisan migrate --force --no-interaction --no-ansi > "$RUNNER_TEMP/gst-f8d3-migrate-$db.log" 2>&1; then
               echo "STOP=LARAVEL12_MYSQL8_MIGRATIONS_FAILED:$db"
@@ -528,27 +551,41 @@ jobs:
               exit 2
             fi
             echo "LARAVEL12_MYSQL8_MIGRATIONS=PASS:$db"
-            php "$RUNNER_TEMP/gst-schema-check.php" "$db" check
+            php "$RUNNER_TEMP/gst-schema-check.php" "$db" check || fail="$fail SCHEMA_CHECK:$db"
           done
-          for db in gst_f8d3_r11_b gst_f8d3_r11_c; do
-            if ! cmp -s "$RUNNER_TEMP/gst-schema-gst_f8d3_r11_a.txt" "$RUNNER_TEMP/gst-schema-$db.txt"; then
+          same=1
+          for db in gst_f8d3_r12_b gst_f8d3_r12_c; do
+            if ! cmp -s "$RUNNER_TEMP/gst-schema-gst_f8d3_r12_a.txt" "$RUNNER_TEMP/gst-schema-$db.txt"; then
               echo "STOP=MYSQL8_SCHEMA_NOT_DETERMINISTIC:$db"
-              diff "$RUNNER_TEMP/gst-schema-gst_f8d3_r11_a.txt" "$RUNNER_TEMP/gst-schema-$db.txt" | head -n 40
-              exit 2
+              diff "$RUNNER_TEMP/gst-schema-gst_f8d3_r12_a.txt" "$RUNNER_TEMP/gst-schema-$db.txt" | head -n 40
+              same=0
+              fail="$fail NOT_DETERMINISTIC:$db"
             fi
           done
-          echo "MYSQL8_SCHEMA_IDENTICAL_ACROSS_3_FRESH_DBS=PASS"
-          DB_DATABASE=gst_f8d3_r11_a php artisan migrate --force --no-interaction --no-ansi > "$RUNNER_TEMP/gst-f8d3-migrate-rerun.log" 2>&1
-          grep -q "Nothing to migrate" "$RUNNER_TEMP/gst-f8d3-migrate-rerun.log"
-          cp "$RUNNER_TEMP/gst-schema-gst_f8d3_r11_a.txt" "$RUNNER_TEMP/gst-schema-before-rerun.txt"
-          php "$RUNNER_TEMP/gst-schema-check.php" gst_f8d3_r11_a check
-          cmp -s "$RUNNER_TEMP/gst-schema-before-rerun.txt" "$RUNNER_TEMP/gst-schema-gst_f8d3_r11_a.txt"
-          echo "MYSQL8_MIGRATE_RERUN_IDEMPOTENT=PASS"
+          if [ "$same" = 1 ]; then echo "MYSQL8_SCHEMA_IDENTICAL_ACROSS_3_FRESH_DBS=PASS"; fi
+          cp "$RUNNER_TEMP/gst-schema-gst_f8d3_r12_a.txt" "$RUNNER_TEMP/gst-schema-before-rerun.txt"
+          rerun=1
+          if ! DB_DATABASE=gst_f8d3_r12_a php artisan migrate --force --no-interaction --no-ansi > "$RUNNER_TEMP/gst-f8d3-migrate-rerun.log" 2>&1; then
+            echo "STOP=MYSQL8_MIGRATE_RERUN_FAILED"
+            tail -n 40 "$RUNNER_TEMP/gst-f8d3-migrate-rerun.log"
+            rerun=0
+          fi
+          if ! grep -q "Nothing to migrate" "$RUNNER_TEMP/gst-f8d3-migrate-rerun.log"; then echo "STOP=MYSQL8_MIGRATE_RERUN_NOT_NOOP"; rerun=0; fi
+          php "$RUNNER_TEMP/gst-schema-check.php" gst_f8d3_r12_a check || rerun=0
+          if ! cmp -s "$RUNNER_TEMP/gst-schema-before-rerun.txt" "$RUNNER_TEMP/gst-schema-gst_f8d3_r12_a.txt"; then
+            echo "STOP=MYSQL8_MIGRATE_RERUN_CHANGED_SCHEMA"
+            diff "$RUNNER_TEMP/gst-schema-before-rerun.txt" "$RUNNER_TEMP/gst-schema-gst_f8d3_r12_a.txt" | head -n 40
+            rerun=0
+          fi
+          if [ "$rerun" = 1 ]; then echo "MYSQL8_MIGRATE_RERUN_IDEMPOTENT=PASS"; else fail="$fail RERUN_NOT_IDEMPOTENT"; fi
+          if [ -n "$fail" ]; then echo "STOP=LARAVEL12_MYSQL8_REPLAY_CHECKS_FAILED:$fail"; exit 2; fi
           echo "LARAVEL12_MYSQL8_MIGRATIONS=PASS_3_FRESH_DBS"
 
       # The Composer dist of FleetOps excludes /scripts (export-ignore), so the ledger
       # bench is read from the same pinned commit; no credentials are persisted.
+      # R12: it only needs the installed candidate, so it runs even when an earlier check is red.
       - name: Fetch FleetOps source at the pinned SHA (read-only, ledger bench only)
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         uses: actions/checkout@v4
         with:
           repository: gsentsas/fleetops
@@ -557,6 +594,7 @@ jobs:
           persist-credentials: false
 
       - name: Race the real anti-replay ledger on Laravel 12 and the disposable MySQL 8 service
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: |
           set -euo pipefail
           src="$GITHUB_WORKSPACE/gst-fleetops-src"
