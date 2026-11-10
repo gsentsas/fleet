@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "kind": "release-candidate-gate-pins",
+  "project": "GST-FLEETBASE",
+  "candidate": "RC1-DRAFT-2026-11-10",
+  "production_decision": "NO_GO",
+  "base_branch": "main",
+  "base_sha": "67b2db64c7490599aaa6c799b26d5e4de897c25c",
+  "forks": {
+    "core_api": {
+      "package": "fleetbase/core-api",
+      "repository": "gsentsas/core-api",
+      "branch": "compat/rc1-laravel12-core-regressions",
+      "commit": "f81cf74e38f9c11d03d0da6d6bdc9a489c7a52dd",
+      "parent_tested_commit": "1b24680edf48eee7fd5988aac89f20b9f965eaa8",
+      "draft_pr": "https://github.com/gsentsas/core-api/pull/2",
+      "status": "CHANGED_NEW_SHA_TESTS_REQUIRED"
+    },
+    "fleetops": {
+      "package": "fleetbase/fleetops-api",
+      "repository": "gsentsas/fleetops",
+      "branch": "compat/p0-f8d3-r11-unsigned-decimal",
+      "commit": "665e4fdf16f0344a24a273ebd1599b92ba6c2728",
+      "status": "SAME_SHA_AS_CI_R12"
+    },
+    "storefront": {
+      "package": "fleetbase/storefront-api",
+      "repository": "gsentsas/storefront",
+      "branch": "compat/p0-f8d3-r12-uuid-default",
+      "commit": "b6d596154370ed5770225d889363a74fab56e584",
+      "status": "SAME_SHA_AS_CI_R12"
+    }
+  },
+  "reference_ci": {
+    "repository": "gsentsas/fleet",
+    "run_id": 42587750098,
+    "workflow_head": "6c7d8835a80a46466c70fa55bd5fb7f9ac55f876",
+    "ci_fork_core": "1b24680edf48eee7fd5988aac89f20b9f965eaa8",
+    "ci_fork_fleetops": "665e4fdf16f0344a24a273ebd1599b92ba6c2728",
+    "ci_fork_storefront": "b6d596154370ed5770225d889363a74fab56e584",
+    "result": "DIAGNOSTIC_GATES_PASS_RELEASE_INTENTIONALLY_NO_GO"
+  },
+  "strict_release_requirements": [
+    "EXACT_NEW_CORE_SHA_COMPOSER_RESOLUTION_AND_LOCK_COMMITTED",
+    "NO_DEV_INSTALL_WITH_BCMATH",
+    "COMPOSER_AUDIT_ZERO_ADVISORIES_AND_ZERO_ABANDONED_NO_WAIVERS",
+    "REGRESSION_GATES_FOR_CHANGED_CORE_SHA",
+    "FLEETOPS_STOREFRONT_SECURITY_IAM_DATABASE_TESTS",
+    "STAGING_WITH_MYSQL_DATA_MIGRATIONS_BACKUP_AND_ROLLBACK",
+    "NO_PRODUCTION_UNTIL_EXPLICIT_APPROVAL"
+  ]
+}

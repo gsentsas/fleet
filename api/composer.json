@@ -20,17 +20,17 @@
     "require": {
         "php": ">=8.0 <8.3",
         "appstract/laravel-opcache": "^4.0",
-        "fleetbase/core-api": "^1.6.74",
+        "fleetbase/core-api": "dev-compat/rc1-laravel12-core-regressions#f81cf74e38f9c11d03d0da6d6bdc9a489c7a52dd as 1.6.74",
         "fleetbase/ai": "^0.0.5",
-        "fleetbase/fleetops-api": "^0.6.75",
+        "fleetbase/fleetops-api": "dev-compat/p0-f8d3-r11-unsigned-decimal#665e4fdf16f0344a24a273ebd1599b92ba6c2728 as 0.6.75",
         "fleetbase/registry-bridge": "^0.1.11",
         "fleetbase/customer-portal-api": "^0.0.16",
-        "fleetbase/storefront-api": "^0.4.31",
+        "fleetbase/storefront-api": "dev-compat/p0-f8d3-r12-uuid-default#b6d596154370ed5770225d889363a74fab56e584 as 0.4.31",
         "fleetbase/ledger-api": "^0.0.13",
         "fleetbase/valhalla-api": "^0.0.5",
         "fleetbase/vroom-api": "^0.0.5",
         "guzzlehttp/guzzle": "^7.0.1",
-        "laravel/framework": "^10.0",
+        "laravel/framework": "^12.69.2",
         "laravel/octane": "~2.22.0",
         "laravel/tinker": "^2.9",
         "league/flysystem-aws-s3-v3": "^3.0",
@@ -50,10 +50,34 @@
         "fakerphp/faker": "^1.9.1",
         "laravel/sail": "^1.0.1",
         "mockery/mockery": "^1.4.4",
-        "nunomaduro/collision": "^7.0",
-        "phpunit/phpunit": "^10.0"
+        "nunomaduro/collision": "^8.0",
+        "phpunit/phpunit": "^11.0"
     },
     "repositories": [
+        {
+            "type": "vcs",
+            "url": "https://github.com/gsentsas/core-api",
+            "canonical": true,
+            "only": [
+                "fleetbase/core-api"
+            ]
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/gsentsas/storefront",
+            "canonical": true,
+            "only": [
+                "fleetbase/storefront-api"
+            ]
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/gsentsas/fleetops",
+            "canonical": true,
+            "only": [
+                "fleetbase/fleetops-api"
+            ]
+        },
         {
             "type": "composer",
             "url": "https://registry.fleetbase.io",

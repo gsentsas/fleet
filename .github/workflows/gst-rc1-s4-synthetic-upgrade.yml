@@ -1,0 +1,170 @@
+name: GST RC1 S4 synthetic upgrade rehearsal (NO GO)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/gst-rc1-s4-synthetic-upgrade.yml'
+      - 'api/composer.json'
+      - 'api/composer.lock'
+      - 'api/database/migrations/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-legacy-delta:
+    name: Verify pending receipt migration on synthetic existing DB
+    if: github.event_name == 'pull_request' && github.head_ref == 'release/rc1-laravel12-consolidation-20261110'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      mysql:
+        image: mysql:8.0-oracle
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: 'yes'
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+    defaults:
+      run:
+        working-directory: api
+    env:
+      COMPOSER_NO_INTERACTION: '1'
+      COMPOSER_NO_AUDIT: '0'
+      APP_ENV: testing
+      APP_URL: http://localhost.test
+      DB_CONNECTION: mysql
+      DB_HOST: 127.0.0.1
+      DB_PORT: '3306'
+      DB_DATABASE: gst_rc1_s4_synthetic
+      DB_USERNAME: root
+      DB_PASSWORD: ''
+      CACHE_STORE: array
+      CACHE_DRIVER: array
+      QUEUE_CONNECTION: sync
+      SESSION_DRIVER: array
+      MAIL_MAILER: array
+      LOG_CHANNEL: stderr
+      TELESCOPE_ENABLED: 'false'
+    steps:
+      - name: Checkout exact RC1 head without persisted credentials
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Set up PHP 8.2 and database extensions
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, xml, gd, zip, pdo_mysql, intl, bcmath, gmp
+          coverage: none
+
+      - name: Protect candidate identity and Composer lock
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          printf '%s  %s\n' 'be721c73404b686992d5971abe712ab2c373bd0e4ecc58bfb2d0a2021be5297c' composer.json | sha256sum --check --status
+          printf '%s  %s\n' 'b73196821fe46d45eb8f4f9e2bd6b0df90a2e62d911b8f840c7fc243c94ba453' composer.lock | sha256sum --check --status
+          test -s database/migrations/2019_12_14_000001_create_personal_access_tokens_table.php
+          test "$DB_HOST" = 127.0.0.1
+          test "$DB_DATABASE" = gst_rc1_s4_synthetic
+          echo "S4_SYNTHETIC_IDENTITY=PASS"
+
+      - name: Install pinned dependencies without re-resolution, audit strictly
+        env:
+          GH_JOB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          composer config --global github-oauth.github.com "$GH_JOB_TOKEN"
+          composer install --no-interaction --prefer-dist --no-progress --no-ansi --no-scripts
+          composer audit --locked --format=plain
+          test -z "$(git status --porcelain -- composer.json composer.lock)"
+          echo "S4_COMMITTED_LOCK_AUDIT=PASS"
+
+      - name: Exercise a missing receipt migration against synthetic existing data
+        run: |
+          set -euo pipefail
+          export APP_KEY="$(php -r 'echo "base64:".base64_encode(random_bytes(32));')"
+          # Core, sandbox and Storefront use separate databases even though their
+          # migration registrations are tracked by Laravel's primary connection.
+          # All three names are prefixed for this disposable GitHub runner only.
+          mysql -h 127.0.0.1 -uroot <<'SQL'
+          CREATE DATABASE gst_rc1_s4_synthetic CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+          CREATE DATABASE gst_rc1_s4_synthetic_sandbox CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+          CREATE DATABASE gst_rc1_s4_synthetic_storefront CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+          SQL
+          echo "S4_THREE_SYNTHETIC_DATABASES=PASS"
+          php artisan migrate --force --no-interaction --no-ansi > "$RUNNER_TEMP/s4-fresh.log" 2>&1 || {
+            tail -n 55 "$RUNNER_TEMP/s4-fresh.log"
+            exit 2
+          }
+          python3 - <<'PY'
+          import os, subprocess
+          base=['mysql','-h','127.0.0.1','-uroot','-N','-B','gst_rc1_s4_synthetic']
+          q="SELECT COUNT(*) FROM migrations WHERE migration='2026_11_08_000001_create_telematic_webhook_receipts_table'"
+          out=subprocess.check_output(base+['-e',q],text=True).strip()
+          if out!='1': raise SystemExit('STOP=RECEIPT_MIGRATION_NOT_FOUND_IN_FRESH_RUN')
+          q="SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='gst_rc1_s4_synthetic' AND table_name='telematic_webhook_receipts'"
+          if subprocess.check_output(base+['-e',q],text=True).strip()!='1':
+            raise SystemExit('STOP=RECEIPT_TABLE_NOT_FOUND_IN_FRESH_RUN')
+          PY
+          # Simulate ONLY the known pre-existing state. This is NOT a Laravel 10
+          # production schema and must never be claimed as a full legacy upgrade.
+          mysql -h 127.0.0.1 -uroot gst_rc1_s4_synthetic <<'SQL'
+          DROP TABLE telematic_webhook_receipts;
+          DELETE FROM migrations WHERE migration = '2026_11_08_000001_create_telematic_webhook_receipts_table';
+          SQL
+          mysql -h 127.0.0.1 -uroot -N -B gst_rc1_s4_synthetic -e "SELECT COUNT(*) FROM migrations WHERE migration = '2026_11_08_000001_create_telematic_webhook_receipts_table'" | grep -qx 0
+          # Capture a fully synthetic pre-upgrade SQL snapshot and test business
+          # marker. This backup must never contain an actual user or production row.
+          mysql -h 127.0.0.1 -uroot gst_rc1_s4_synthetic <<'SQL'
+          CREATE TABLE s4_synthetic_business_marker (id INT PRIMARY KEY, marker CHAR(64) NOT NULL);
+          INSERT INTO s4_synthetic_business_marker (id, marker)
+          VALUES (1, SHA2('rc1-s7-disposable-row-retention-proof', 256));
+          SQL
+          mysqldump --host=127.0.0.1 --user=root --single-transaction --quick --no-tablespaces gst_rc1_s4_synthetic > "$RUNNER_TEMP/s4-preupgrade.sql"
+          test -s "$RUNNER_TEMP/s4-preupgrade.sql"
+          echo "S7_SYNTHETIC_PRE_UPGRADE_SNAPSHOT=PASS"
+          php artisan migrate --force --no-interaction --no-ansi > "$RUNNER_TEMP/s4-incremental.log" 2>&1 || {
+            tail -n 55 "$RUNNER_TEMP/s4-incremental.log"
+            exit 2
+          }
+          grep -q '2026_11_08_000001_create_telematic_webhook_receipts_table' "$RUNNER_TEMP/s4-incremental.log"
+          php -r '
+          $p=new PDO("mysql:host=127.0.0.1;dbname=gst_rc1_s4_synthetic","root","", [PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION]);
+          $q=$p->query("SELECT COUNT(*) FROM migrations WHERE migration=\x272026_11_08_000001_create_telematic_webhook_receipts_table\x27")->fetchColumn();
+          if ((int)$q!==1) exit(2);
+          $c=$p->query("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=\x27gst_rc1_s4_synthetic\x27 AND table_name=\x27telematic_webhook_receipts\x27")->fetchColumn();
+          if ((int)$c!==9) exit(3);
+          echo "S4_RECEIPT_INCREMENTAL_MIGRATION=PASS\n";
+          '
+          php artisan migrate --force --no-interaction --no-ansi > "$RUNNER_TEMP/s4-rerun.log" 2>&1
+          grep -q 'Nothing to migrate' "$RUNNER_TEMP/s4-rerun.log"
+          echo "S4_SYNTHETIC_RERUN_IDEMPOTENT=PASS"
+          # Check existing synthetic rows were preserved across the incremental
+          # migration, then recover the PRE-UPGRADE database into a new database.
+          mysql -h 127.0.0.1 -uroot -N -B gst_rc1_s4_synthetic -e "SELECT marker FROM s4_synthetic_business_marker WHERE id=1" | grep -qx "$(printf 'rc1-s7-disposable-row-retention-proof' | sha256sum | cut -d' ' -f1)"
+          echo "S4_SYNTHETIC_ROW_RETENTION=PASS"
+          mysql -h 127.0.0.1 -uroot -e 'CREATE DATABASE gst_rc1_s7_rollback CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci'
+          mysql -h 127.0.0.1 -uroot gst_rc1_s7_rollback < "$RUNNER_TEMP/s4-preupgrade.sql"
+          mysql -h 127.0.0.1 -uroot -N -B gst_rc1_s7_rollback -e "SELECT marker FROM s4_synthetic_business_marker WHERE id=1" | grep -qx "$(printf 'rc1-s7-disposable-row-retention-proof' | sha256sum | cut -d' ' -f1)"
+          mysql -h 127.0.0.1 -uroot -N -B gst_rc1_s7_rollback -e "SELECT COUNT(*) FROM migrations WHERE migration='2026_11_08_000001_create_telematic_webhook_receipts_table'" | grep -qx 0
+          mysql -h 127.0.0.1 -uroot -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='gst_rc1_s7_rollback' AND table_name='telematic_webhook_receipts'" | grep -qx 0
+          echo "S7_SYNTHETIC_DATABASE_SNAPSHOT_ROLLBACK=PASS"
+          echo "S4_REAL_LARAVEL10_SNAPSHOT_UPGRADE=NOT_TESTED"
+          echo "S7_REAL_PRODUCTION_ROLLBACK=NOT_TESTED"
+          echo "PRODUCTION_DECISION=NO_GO"
+
+      - name: Print safe diagnostics on failure
+        if: failure()
+        run: |
+          for path in "$RUNNER_TEMP"/s4-*.log; do
+            test ! -f "$path" || tail -n 25 "$path"
+          done

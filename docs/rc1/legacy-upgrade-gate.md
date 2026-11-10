@@ -1,0 +1,585 @@
+# RC1 S4 — legacy-to-Laravel 12 upgrade gate
+
+**Status: NOT EXECUTED / NO-GO**. This is a preparation and preflight record, not approval to upgrade an active MySQL instance.
+
+## Verified baseline (2026-11-10)
+
+- Running Fleetbase on mail01: `/opt/gst-fleet`, git `67b2db6` (Laravel 10 baseline). Eight operational Docker services, no RC1 test container left behind.
+- Production schema aggregates: `fleetbase` 152 tables and 394 migration records (batch 2); `fleetbase_sandbox` 138 tables and 304 migration records (batch 3); `fleetbase_storefront` 33 tables, no local `migrations` table.
+- **Exact S3 source-vs-registry audit:** compare all migration filenames from the pinned Core API `f81cf74e` (`migrations/`), FleetOps `665e4fdf` (`server/migrations/`), and Storefront `b6d5961` (`server/migrations/`) against the live migration-name registers, read-only. Core **123/123** main and **123/123** sandbox; FleetOps **172/173** main and **172/173** sandbox; Storefront **55/55** main and **0/55** sandbox. The sole absent FleetOps name is `2026_11_08_000001_create_telematic_webhook_receipts_table`. Storefront's provider registers its migrations using `loadMigrationsFrom`; its **55/55 entries appear in the main** `fleetbase.migrations` table, so the missing `fleetbase_storefront.migrations` table is not by itself a fault. This comparison covers **only those three packages** (351 migration files); it does not prove accounting for other packages or actual Laravel 12 upgrade behavior.
+- Restic snapshot `860ef168` (2026-11-10) restored all 3 SQL dumps in isolated MySQL 8.0.46: 152 / 138 / 33 base tables. Test container used `--network none`, no ports or bind mounts, and was removed; active production containers remained unchanged.
+- RC1 run `42812781069` proved 395 package migrations on three **fresh** MySQL databases and anti-replay; it did **not** prove migration of restored Laravel 10 data.
+- Host safety: 49 GiB free of 697 GiB (~94% used), ~4.9 GiB memory available, swap absent. This is a multi-tenant application host. RC1 application image not installed/pinned here.
+
+## Preconditions before an S4 upgrade attempt
+
+1. Use dedicated disposable host/CI runner or approved isolated compute with adequate free space and memory. The existing `gstfleet` Docker project, ports, bind mounts, volumes, network, credentials and snapshots must never be shared.
+2. Build/pull **SHA-identified** RC1 API image from the exact PR #6 HEAD and verify its `api/composer.lock` and three fork pins. Do not use an `:latest` image from the production host.
+3. Restore `860ef168` (or a newer formally selected snapshot) into a private fresh MySQL container with no inbound access, no source database credentials, and no writes to existing MySQL.
+4. Before starting Laravel, collect schema, row-count/checksum baselines, migration names and batches for all three databases, plus Storefront-specific migration registration and connection mapping. No customer row values in job logs.
+5. Disable scheduler, queues, telemetry/webhooks, external emails/SMS, payments, socket publication and outbound integrations in upgrade lab; ensure strict network egress isolation while preserving only the minimum isolated database connectivity.
+6. Run only the real RC1 migration commands (including sandbox and Storefront) against restored copies, with a verification step that refuses any production hostname/volume/credential. Record SQL errors, pending migrations and schema diff; repeat migrate to prove NOOP.
+7. Validate auth/IAM/IDOR, tenant isolation and webhook anti-replay receipts with sanitized test identities; confirm production data unchanged.
+8. Rehearse **full rollback** on the disposable lab from the pre-upgrade database snapshot and previous application image. A code-only rollback is not enough after incompatible schema changes. Do not drop anti-replay receipt history or replay live webhooks.
+
+## STOP criteria
+
+Missing image digest or migration plan; insufficient disk/RAM; any production endpoint/mount/secret; unsafe outbound traffic; unknown historical migrations; failed restoration, schema/data checks or rollback.
+
+## Consolidated evidence — 2026-11-10
+
+- **S2 real backup SQL recovery:** encrypted Restic snapshot `860ef168` re-imported into an isolated ephemeral MySQL 8 container on mail01; 152 main + 138 sandbox + 33 Storefront base tables. No production mount, network or published port. Import test ended with ephemeral container removed and active DB container unchanged.
+- **S3 package-to-registry reconciliation:** Core 123/123, FleetOps 172/173 (pending receipt migration), Storefront 55/55 recorded in main. Audit only covers these pinned three forks; other packages may have migrations.
+- **S4 synthetic historical schema upgrade:** [run 42850611453](https://github.com/gsentsas/fleet/actions/runs/42850611453) SUCCESS, pinned Laravel 10 baseline (394 main migrations / 152 main tables / 138 sandbox tables) followed by pinned Laravel 12 migration on the **same three entirely synthetic MySQL databases**, followed by idempotent rerun. Main and sandbox each gained one telematics receipt table.
+- **S7 synthetic SQL recovery:** [run 42850611453](https://github.com/gsentsas/fleet/actions/runs/42850611453) SUCCESS. After adding one disposable integrity-fixture table and row to each DB, pre-upgrade base table counts 153/139/34; after upgrade 154/140/34; recovered original snapshots 153/139/34. Fixture rows, schema metadata SHA-256 fingerprints (tables/columns/indexes/FKs), and migration registry recovery verified 3/3.
+- **Other CI on same head:** API, Console, Install Smoke and committed Composer security audit all SUCCESS. The RC1 diagnostic workflow retains a deliberately failing publication-prevention final step.
+- **Operational read-only host gate:** mail01 hosts multiple services, ~49 GiB free at 94% filesystem utilization, ~5.0 GiB available RAM, zero swap; Mac ~11 GiB free, Docker Desktop ~8.3 GB RAM. Do not build a second full Fleetbase stack on either host without capacity qualification. All eight production `gstfleet` containers remain running, backup and offsite unit results SUCCESS, no `gst-rc1*` containers remaining.
+
+## Outstanding irreversible production gates
+
+1. Provision or identify **dedicated private staging compute** with demonstrably adequate reserved disk/RAM and separately pinned container images. The current shared mail01 and low-free-space Mac have **not** passed this gate.
+2. Restore the encrypted production snapshot **only inside the private staging trust boundary**. Keep credentials, tenant data and backups off public GitHub-hosted runners. Ensure app workers/webhooks/schedulers/email/SMS/payments and external network side effects are disabled.
+3. Execute the exact RC1 Laravel 12 API against the **restored existing-data databases**. Compare row cardinality and key integrity for sensitive business tables without logging their contents; prove the receipt migration, no pending migrations, no-op second pass, IAM/IDOR and transport workflows.
+4. Run a **complete application and database rollback rehearsal** in that isolated environment, including pinned old runtime and three DB recoveries. Verify no webhook replay, no data loss, and demonstrate restart/health.
+5. Obtain an explicit production change gate before any merge, deployment, database migration or switch of real traffic.
+
+**Current decision:** `S2_REAL_SQL_RESTORE=PASS`, `S3_THREE_FORK_MAPPING=PASS_WITH_ONE_PENDING`, `S4_SYNTHETIC_UPGRADE=PASS`, `S7_SYNTHETIC_SQL_RECOVERY=PASS`, `S4_REAL_DATA_UPGRADE=NOT_RUN`, `S7_FULL_APP_ROLLBACK=NOT_RUN`, `PRODUCTION=NO_GO`.
+
+
+## Capacity recheck after host cleanup — 2026-11-10
+
+A **fresh read-only** run of `scripts/rc1-private-staging-capacity-gate.sh` changed the disk assessment, not the release decision:
+
+| Candidate | Free disk | Disk used | Available host RAM | Production services | Gate |
+|---|---:|---:|---:|---|---|
+| Mac Docker Desktop | ~11 GiB | ~95% | macOS host memory not attested; Docker ~7.75 GiB | none | **NO-GO** |
+| `mail01` shared server | **228 GiB** | **68%** | ~5.0 GiB | **8 live `gstfleet` containers** | **NO-GO** |
+
+The server's free disk increased considerably since the prior observation (~50 GiB). This is independently observed system capacity and **must not be attributed to our earlier cache cleanup**. The script's **disk thresholds now PASS on mail01**, but RAM and isolation gates fail. No second stack or customer-data upgrade was launched, no snapshot moved, and live production was not restarted.
+
+**Feasible next research:** a deliberately constrained, private single-use restore/migration proof on dedicated compute or a proven isolated disposable environment with strict CPU/memory quotas, no public ports, no external side effects and independent old/new application artifacts. Such a proof still needs explicit full rollback and validated capacity. The presence of free disk alone is **not authorization** to run it on the shared production server.
+
+**Current production decision: NO-GO.**
+
+
+## S4-LAB-0: ephemeral Docker isolation proof on mail01 — 2026-11-10
+
+**PASS for container guardrails only, NOT a production-data Laravel upgrade.** After clearing two definitively suspended old development processes, the server had approximately 6.0 GiB `MemAvailable`, no recent memory PSI pressure, 228 GiB disk free, and eight healthy/running GST Fleetbase production services.
+
+A single **already locally available** `php:8.3-fpm-alpine` container was launched with the following deliberately conservative options:
+`--network none --memory 128m --memory-swap 128m --cpus 0.50 --pids-limit 64 --read-only --cap-drop ALL --security-opt no-new-privileges:true --tmpfs /tmp:rw,noexec,nosuid,size=8m`. No bind mount, secret, backup, external network, published port, database access, Docker image build/pull, or project worktree access.
+
+Docker `inspect` proved: `NETWORK=none`, `MEM_BYTES=134217728`, `MEM_SWAP=134217728`, `NANO_CPUS=500000000`, `PIDS=64`, `READONLY=true`, `PORTS={}`, `MOUNTS=0`. Running `php -r` inside the ephemeral container passed (`PHP_8.3`). The container was immediately removed; remaining containers using the selected PHP image: **zero**. Fleetbase app and database health checked **healthy** afterward. This is a bounded Docker security primitive proof, **not** an application upgrade or database restoration proof.
+
+**Next prerequisite before touching real data**: obtain a separate private isolated host, or design a dedicated disposable restore workflow on sufficiently provisioned compute with a reproducible pinned Laravel 12 runtime, documented backup-data boundary, explicit no-side-effects policy, resource quotas, schema and business-data checks, and paired full rollback. Do not infer a production **GO** from this successful container test. `S4_REAL_DATA_UPGRADE=NOT_RUN`, `S7_FULL_ROLLBACK=NOT_RUN`, `PRODUCTION=NO_GO`.
+
+
+## Encrypted backup metadata readiness preflight — 2026-11-10
+
+The new **read-only** `scripts/rc1-real-backup-metadata-preflight.sh` was executed on `mail01` without changing or exporting customer data. Syntax: PASS, exit code: 0.
+
+- `gstfleet-backup.service` and `gstfleet-offsite.service`: last result SUCCESS and both executions within 36 hours.
+- Existing private Restic repository: accessible and encrypted; local metadata enumerates **9 snapshots**, newest around **14 hours** old.
+- `RC1_BACKUP_METADATA_READINESS=PASS_RESTORE_STILL_REQUIRED`.
+- **Not established by this preflight:** remote B2 snapshot content verification, restoreability of all three databases, data consistency after the Laravel 12 migration, application restart under Laravel 10, full-stack rollback or staging isolation. These remain **NO-GO** release requirements.
+
+Never turn a metadata check or successful backup timer into production approval. Never send genuine backup data to public CI runners.
+
+
+## Encrypted backup pack and three SQL archive integrity — 2026-11-10
+
+The committed **read-only** script `scripts/rc1-real-backup-integrity-preflight.sh` was run via SSH against the private local Restic repository on `mail01`, with **no production MySQL connections or import, no data printed, and no offsite access**. Syntax `bash -n=PASS`, remote exit code `0`.
+
+- `restic --no-lock check --read-data` (low I/O priority, timeout): **all 9 snapshots, all 19 data packs** checked; `no errors were found`.
+- The newest daily snapshot was pinned by immutable snapshot ID, rather than using a moving `latest` selector.
+- The three exports `fleetbase.sql.gz`, `fleetbase_sandbox.sql.gz`, `fleetbase_storefront.sql.gz` were each streamed from **that same snapshot** into `gzip -t`, and all **passed**.
+- Archive integrity is **not** the same as valid SQL or restorable customer data. Importing all three backups into an isolated DB, schema/row integrity and complete application rollback are still **NOT TESTED**. Production remains **NO-GO**.
+
+
+## Read-only structural inspection of genuine backup SQL — 2026-11-10
+
+A pinned daily Restic snapshot (ID prefix `860ef168c572`) was streamed directly into a SQL statement counter without persisting or disclosing data. The new committed script `scripts/rc1-real-backup-sql-structure-preflight.sh` ran on mail01 with `bash -n=PASS`, exit code `0` and fail-closed expected schema counts.
+
+| Dump | `CREATE TABLE` statements | `INSERT INTO` statements | Uncompressed bytes |
+|---|---:|---:|---:|
+| `fleetbase` | 152 | 50 | 8,321,796 |
+| `fleetbase_sandbox` | 138 | 4 | 365,945 |
+| `fleetbase_storefront` | 33 | 2 | 73,085 |
+
+All three **structural presence checks PASS** and match the audited live table counts. These are statement counts, **not data row counts, parse validity, SQL import success, consistency, or rollback evidence**. The application and MySQL production containers were verified healthy following execution. No actual MySQL import, migration, service restart, data extraction or staging installation occurred. `PRODUCTION=NO_GO`.
+
+
+## First isolated import of all three genuine backup databases — PASS (2026-11-10)
+
+The committed `scripts/rc1-real-three-db-private-restore-lab.sh` was executed against immutable daily Restic snapshot prefix `860ef168c572` on `mail01`. **Real production SQL exports were imported into a disposable MySQL 8 container; no connection to production MySQL occurred.**
+
+**Isolation:** Docker network `none`, no published ports, no host/project mount, read-only root filesystem; `/var/lib/mysql` was an ephemeral `tmpfs` (768 MiB maximum), container memory+swap capped at 1536 MiB, 1 CPU and 128 PIDs. `MYSQL_ALLOW_EMPTY_PASSWORD` was permitted **only** inside this networkless socket-only disposable MySQL instance. Container was removed afterward; verification showed no remaining `gst-rc1-private-restore-*` container. Production Fleetbase API/MySQL remained `running, healthy`.
+
+**Critical diagnostic/correction:** Early attempts returned MySQL client `ERROR 2013` because `mysqladmin ping` was detecting the official image's **temporary bootstrap server**. MySQL's entrypoint intentionally shuts that server down before launching the final server; imports raced the shutdown. The script now waits for `MySQL init process done. Ready for start up.` **and** a responsive local MySQL socket. Merely raising memory limits was not the fix.
+
+| Genuine backup restored to isolated MySQL 8 | Import result | Base tables after import |
+|---|---|---:|
+| `fleetbase.sql.gz` | PASS | **152** |
+| `fleetbase_sandbox.sql.gz` | PASS | **138** |
+| `fleetbase_storefront.sql.gz` | PASS | **33** |
+| **All three** | **PASS** | **323** |
+
+**Final execution:** `bash -n=PASS`, `RC1_RESTORE_ISOLATION=PASS`, `RC1_RESTORE_MYSQL_FINAL_START=PASS`, `RC1_REAL_THREE_DB_IMPORT=PASS_ISOLATED`, exit code **0**, automatic lab cleanup attempted and verified no leftover container.
+
+**Remaining production gates:** Laravel 12 migration against this restored existing-data set, post-migration row counts/business invariants and full application+DB rollback with the pinned Laravel 10 runtime are **NOT RUN**. The one-shot MySQL restore succeeded, but a full private staging environment remains unqualified; no merge, tag, public CI with customer data, or live deployment. `PRODUCTION=NO_GO`.
+
+
+## Three real restored SQL schemas: migration registries and relational integrity metadata — 2026-11-10
+
+The latest committed `scripts/rc1-real-three-db-private-restore-lab.sh` was rerun against the pinned daily Restic backup, inside a single isolated socket-only MySQL 8 container (`--network none`, no published ports, read-only root filesystem, 1536 MiB memory limit, 768 MiB ephemeral MySQL tmpfs). **Result: `RC1_REAL_THREE_DB_IMPORT=PASS_ISOLATED`, exit code 0; disposable container removed, production Fleetbase API/DB still healthy.**
+
+| Real restored database | Base tables | Tables with indexes | Foreign-key constraints | Migration registry records | Status |
+|---|---:|---:|---:|---:|---|
+| `fleetbase` | 152 | 152 | 329 | 394 | PASS |
+| `fleetbase_sandbox` | 138 | 138 | 311 | 304 | PASS |
+| `fleetbase_storefront` | 33 | 33 | 81 | No migrations table (expected) | PASS |
+| **Total** | **323** | **323** | **721** | **698 in two registries** | **PASS** |
+
+No tables were printed and no user data exported or logged. Registry record counts exactly match the previously audited production baseline. The first trial of this additional metadata assertion failed because of incorrectly escaped `printf` newlines; commit `f416e1f1` corrected only the test harness, then the complete rerun succeeded.
+
+**Important boundary:** this is a successful **MySQL restoration plus relational-metadata consistency proof**, not Laravel 12 running on the restored databases. No RC1 application runtime, migration or full application+data rollback was executed. `PRODUCTION=NO_GO`.
+
+
+## First actual Laravel 12 upgrade AND Laravel 10 CLI/database rollback rehearsal — PASS (2026-11-10)
+
+**Real backup data, in a restricted disposable local Docker laboratory on mail01; no live production DB connection.** This extends earlier synthetic tests and does not authorize a production release.
+
+Pinned runtime artifacts:
+- Laravel 12 source SHA `31a6a026c7062b3febe2ff90d0927f16a74bf834`, pinned Composer JSON/LOCK SHA-256 values already validated by CI, PHP 8.2, dependencies installed separately with `--no-scripts --no-plugins`. Route bootstrap loaded **1,839 routes**.
+- Laravel 10 historical source SHA `67b2db64c7490599aaa6c799b26d5e4de897c25c`, content exported from the exact historical Git object into a separate private directory, Composer.lock SHA-256 verified, PHP 8.2, separate locked dependencies/autoload PASS. Its historical dependencies have legacy advisories; this rehearsal is not a security approval.
+- Existing three encrypted daily Restic SQL dumps were streamed locally to MySQL 8.0 in a **networkless** Docker container. All three backups were successfully imported. MySQL data was `tmpfs` only (768 MiB), no public ports, no host database mount, RAM limited to 1536 MiB. PHP CLI ran separately with `--network container:<temporary-mysql>`, no outbound network, read-only application mount and ephemeral caches, memory limited to 512 MiB.
+
+**S4 actual upgrade results:**
+| DB | Initial tables | Laravel 12 tables | Historical migration records | After Laravel 12 |
+|---|---:|---:|---:|---:|
+| `fleetbase` | 152 | 153 | 394 | 395 |
+| `fleetbase_sandbox` | 138 | 139 | 304 | 305 |
+| `fleetbase_storefront` | 33 | 33 | No registry | No registry |
+
+`php artisan migrate:status`, `php artisan migrate --force`, and `php artisan sandbox:migrate --force` on genuine restored databases all **PASS**.
+
+**S7 rollback rehearsal results:** Before migration, SHA-256 digests of canonical MySQL SQL dumps were captured for each database, without disclosing data. Initial rollback attempt hit MySQL `ERROR 3730` due to inter-schema foreign keys. Corrected the lab to **drop and recreate all three disposable schemas as a coordinated operation with FOREIGN_KEY_CHECKS=0 only inside the networkless disposable MySQL**, then replay the pinned Restic archives. The final run achieved:
+- Three databases restored to exactly **152 / 138 / 33 tables**, with **3/3 canonical SQL content SHA-256 fingerprints identical** to the before-upgrade databases.
+- Historical migration registries restored to **394 / 304**, and the RC1-only `telematic_webhook_receipts` table absent from the restored historical schema.
+- **Pinned Laravel 10 CLI** `php artisan migrate:status` PASS against recovered MySQL, and `php artisan route:list --json` PASS.
+- Reproducible script: `scripts/rc1-real-laravel10-rollback-rehearsal.sh`; **`RC1_S7_ISOLATED_DB_AND_LARAVEL10_CLI_ROLLBACK=PASS`**, **exit 0**.
+- No leftover `gst-rc1-*` lab containers at postflight; 8/8 Fleetbase production containers remain Up, backup/offsite latest Result=success, production checkout unchanged at `67b2db64`.
+
+**Remaining gates:** This proves a **three-DB real-data upgrade/recovery plus pinned Laravel 10 CLI boot**, NOT an end-to-end HTTP/socket/queue/worker restore, full application traffic switch or production rollback. It does not fully prove post-upgrade tenant-level business invariants or external service isolation in a real multi-container staging topology. Therefore **PR #6 remains DRAFT; production GO/NO-GO = NO-GO** until a formal dedicated staging full-stack E2E rehearsal and change approval.
+
+
+## Real-data preservation across Laravel 12 migration: exact historical table row-count gate (2026-11-10)
+
+The committed script `scripts/rc1-real-laravel10-rollback-rehearsal.sh` (change `5e2779ee`) was executed again against the same pinned encrypted real-data snapshot in the networkless disposable lab.
+
+A new safety invariant computes SHA-256 of **exact `COUNT(*)` results from every existing historical base table** in each of `fleetbase`, `fleetbase_sandbox` and `fleetbase_storefront`, before migration and immediately after Laravel12 migrations. The `migrations` registry is excluded because one migration is legitimately added; the new telematic receipts table did not exist in the historical table set. The SQL output is hashed on the private host and **neither row data, table names nor individual counts are printed**.
+
+- `RC1_S4_HISTORICAL_TABLE_ROW_COUNT_INVARIANTS_fleetbase=PASS`.
+- `RC1_S4_HISTORICAL_TABLE_ROW_COUNT_INVARIANTS_fleetbase_sandbox=PASS`.
+- `RC1_S4_HISTORICAL_TABLE_ROW_COUNT_INVARIANTS_fleetbase_storefront=PASS`.
+- `RC1_S4_THREE_DATABASES_HISTORICAL_ROW_COUNTS=PASS`.
+- Subsequent rollback of the three SQL databases to the pre-upgrade state: **three canonical SQL content hashes matched**.
+- Pinned historical Laravel10 CLI: `artisan migrate:status` and `artisan route:list --json` both PASS on those restored databases.
+- **Full script exit 0**, ephemeral container removed, production API and MySQL remain healthy.
+
+**Scope clarification:** exact row-count equality is stronger than table counts but cannot detect altered values when the number of rows stays constant. Neither full per-row business-value diff nor actual HTTP/queue/socket/worker rollback was performed. Production remains NO-GO pending full-stack private staging validation and authorized change gate.
+
+
+## Real-data values preserved after Laravel12 (all historical tables) — 2026-11-10
+
+Committed test `scripts/rc1-real-laravel10-rollback-rehearsal.sh` at commit `063589c7` was rerun against three actual Restic-restored databases in a networkless disposable MySQL container. Before migration, it hashed **data-only MySQL dump streams with primary-key ordering** from all historical tables while explicitly omitting the `migrations` registry and the RC1-only `telematic_webhook_receipts` table. The same hashes were recomputed after Laravel12 migration. No business records, table names or hashes were emitted to public logs.
+
+- `RC1_S4_HISTORICAL_ROW_VALUES_fleetbase=PASS`.
+- `RC1_S4_HISTORICAL_ROW_VALUES_fleetbase_sandbox=PASS`.
+- `RC1_S4_HISTORICAL_ROW_VALUES_fleetbase_storefront=PASS`.
+- `RC1_S4_THREE_DB_HISTORICAL_ROW_VALUES=PASS`.
+- Historical table `COUNT(*)` invariants also PASS for all three databases.
+- Laravel12 upgrades of real restored data PASS (tables **153/139/33**, migrations **395/305**).
+- Follow-on recovery restores three original SQL database images, all **3/3 full canonical SQL content fingerprints equal**, original tables **152/138/33**, migration registries **394/304**, pinned Laravel10 CLI migration status and route bootstrap both PASS.
+- Full script: **exit 0**, no remaining temporary lab containers, production API/MySQL healthy.
+
+**Limitations:** Data-only dump fingerprints capture business row values as serialized by pinned MySQL with primary-key ordering. They do not prove all integration/HTTP/socket/worker flows under real traffic; no production upgrade occurred and PR #6 stays DRAFT. The full-stack rollback gate remains NO-GO.
+
+
+## Actual HTTP health checks on Laravel 12 and restored Laravel 10 — PASS (2026-11-10)
+
+A **real HTTP server** was started for each runtime inside Docker with `--network container:<networkless-disposable-mysql>`; only the container-internal loopback address `127.0.0.1:18770` was bound. **No port was published, no external network access was available**, no production APIs or databases were called. The `GET /health` endpoint was discovered in the application's real route registry (Laravel 12: 1,839 routes).
+
+The new HTTP probes are included in the complete, committed `scripts/rc1-real-laravel10-rollback-rehearsal.sh` (change `6ba2c950`). They use an ephemeral PHP 8.2 container with the pinned Laravel 12/10 source mounted read-only, transient storage and caches, explicit testing environment and the restored MySQL database over loopback. No HTTP bodies or customer records are printed.
+
+- Actual encrypted Restic backups restored: **152/138/33 tables** on disposable MySQL 8.
+- Laravel 12 migration PASS: **153/139/33**, migration registries **395/305**.
+- Business-row values/row-count hashes after upgrade: **PASS in all three databases**.
+- **Laravel 12 HTTP `GET /health` → status 200, PASS**.
+- Recovery of original MySQL schema and data: **3/3 canonical SQL content hashes match**, migration registries **394/304**.
+- Historical pinned Laravel 10 CLI route bootstrap and DB migration status PASS.
+- **Laravel 10 HTTP `GET /health` → status 200, PASS** after restore.
+- Complete script **exit 0**; ephemeral lab containers removed and production API/MySQL healthy.
+
+**Scope:** an HTTP health smoke and database/CLI rollback are not a full end-to-end HTTP workflow, queue/worker or socket failover. These require dedicated full-stack staging with safe egress rules before releasing. `PRODUCTION=NO_GO`.
+
+
+## Protected HTTP GET unauthorized checks — Laravel 12 and restored Laravel 10 (2026-11-10)
+
+The complete, committed real-data laboratory script `scripts/rc1-real-laravel10-rollback-rehearsal.sh` (change `138f8db0`) now tests **five read-only protected HTTP GET endpoints with no credentials** while the restored MySQL database is actually available. This is important: the initial no-database experiment produced 503 and **was not counted as an authentication success**.
+
+| Route (GET, unauthenticated) | After Laravel 12 upgrade | After restoring Laravel 10 |
+|---|---:|---:|
+| `/v1/orders` | **401** | **401** |
+| `/v1/drivers` | **401** | **401** |
+| `/v1/vehicles` | **401** | **401** |
+| `/int/v1/orders` | **401** | **401** |
+| `/int/v1/users` | **401** | **401** |
+| `/health` | **200** | **200** |
+
+Checks run within one networkless Docker namespace, no public ports, no credentials, no write requests, no response bodies printed. Both `RC1_L12_UNAUTHENTICATED_ROUTE_DENIAL=PASS` and `RC1_L10_UNAUTHENTICATED_ROUTE_DENIAL=PASS`. The same rehearsal preserved all historical business-row hashes after Laravel12 migration, then restored 3/3 original database SQL hashes with pinned Laravel10 CLI startup PASS. **Full script exit code 0** and no remaining lab containers; production API/MySQL stayed healthy.
+
+**Boundary:** these are negative unauthorized GET checks, not actual authenticated API business workflows, tenant/IDOR coverage, worker processing, or socket failover. Those tests remain outstanding and production stays NO-GO.
+
+
+## Minimal isolated queue worker CLI bootstrap — Laravel 12 / Laravel 10 (2026-11-10)
+
+On the private host, both pinned runtimes were started in short-lived PHP containers with `--network none`, read-only code, transient storage, memory capped at 384 MiB and `QUEUE_CONNECTION=sync`. Both completed `artisan queue:work sync --once --stop-when-empty --sleep=0 --tries=1` successfully within a 25-second timeout:
+
+- `RC1_L12_QUEUE_WORKER_EMPTY_SYNC_BOOT=PASS`.
+- `RC1_L10_QUEUE_WORKER_EMPTY_SYNC_BOOT=PASS`.
+
+**This is only a CLI startup/empty-queue smoke.** It does not establish real Redis queue connectivity, job dispatch and completion, retries, delayed jobs, worker failover or sockets. Those remain **NOT TESTED** and cannot justify production GO.
+
+
+## Real Redis queue job execution on pinned Laravel 12 / Laravel 10 + SocketCluster isolated auth probe — 2026-11-10
+
+**Isolated Redis test:** The already-present `redis:7.4-alpine` image was run in Docker with `--network none`, no published ports, read-only root filesystem, memory 128 MiB and **no persistence**. PHP 8.2 containers with the pinned Laravel12 SHA `31a6a026` and historical Laravel10 SHA `67b2db64` shared only that networkless namespace, used ephemeral storage, and connected to loopback Redis. A tiny PHP script existed only under host `/dev/shm`, mounted read-only, and was removed on exit. Each runtime used `CallQueuedClosure::create` to enqueue a disposable job that only sets a `rc1:job:complete=yes` marker on ephemeral Redis, with no business-data, MySQL or external service access.
+
+- Laravel12: **1 queued job**, `artisan queue:work redis --once --tries=1` exit PASS, **0 queued afterward**, marker confirmed: **`RC1_L12_REAL_REDIS_JOB_PROCESSING=PASS`**.
+- Laravel10: identical end-to-end Redis dispatch/consume/marker assertions: **`RC1_L10_REAL_REDIS_JOB_PROCESSING=PASS`**.
+- The Redis namespace and all temporary PHP/file artifacts were destroyed. Initial probes using unsupportable job types and `php -r` closures were **NO-GO** and not counted as success; the valid test required a source-backed serialized closure. Laravel Redis keys are prefixed, so queue assertions used the actual matching key, not the unprefixed `queues:default`.
+
+**Isolated SocketCluster test:** The existing pinned `fleetbase/fleetbase-socket:v0.7.75` image (ID `sha256:92912305086865ea515d8d74d9795223d7d92df2598c839f804b3cbe4fd78c18`) ran **without network connectivity or published ports**, read-only root filesystem, a 256 MiB memory cap and a throwaway test-only authentication key. The server was configured with `SOCKETCLUSTER_AUTH_ENABLED=true` and `SOCKETCLUSTER_AUTH_MODE=enforce`. Using Node inside the same isolated container:
+
+- `GET /health-check` returned **HTTP 200**.
+- A local WebSocket handshake to `/socketcluster/` succeeded.
+- An anonymous SocketCluster client attempted to subscribe to `user.rc1-no-credentials`. Server response: **subscription denied with reason `no_token`**, `RC1_SOCKET_UNAUTHENTICATED_SUBSCRIBE=PASS`.
+
+**Remaining gaps:** authenticated/tenant-scoped HTTP business flows; Redis retry/failure recovery and real Fleetbase job processing; signed WebSocket token and authorized pub/sub; full-stack concurrent HTTP + queue + socket with rollback and traffic switching on a **dedicated staging host**. These isolated unit-sized integration probes are **not** proof of production multi-service failover. PR #6 remains DRAFT, `PRODUCTION=NO_GO`.
+
+
+## Real Redis first-failure retry + signed SocketCluster scope authorization — PASS (2026-11-10)
+
+**Redis retry lab:** A source-backed disposable `CallQueuedClosure` was enqueued into local ephemeral Redis 7.4 with `--network none`. On its first execution, the closure incremented a test-only Redis attempt counter then intentionally threw `RuntimeException`; it set a completion marker only on the second execution. For each runtime, the test ran `artisan queue:work redis --once --tries=2 --backoff=0 --timeout=12` twice. Pinned Laravel 12 and historical Laravel 10 each yielded exactly:
+
+- Initial job queued = **1**.
+- Attempts after first worker invocation = **1**.
+- Attempts after second worker invocation = **2**.
+- Final completion marker = **yes**.
+- `RC1_L12_REDIS_FAILURE_RETRY=PASS` and `RC1_L10_REDIS_FAILURE_RETRY=PASS`, command exit 0. No business job, production Redis, MySQL or external services were accessed. Temporary source and Docker containers were deleted.
+
+**Signed WebSocket policy lab:** Pinned Fleetbase SocketCluster v0.7.75 ran with a throwaway HS256 key, `AUTH_ENABLED=true`, `AUTH_MODE=enforce`, `--network none`, no exposed ports, a read-only root and 256 MiB memory limit. A SocketCluster client used a *real correctly signed* test JWT with user claims and a **single explicit `scp` scope**. It authenticated successfully and was permitted to subscribe to `user.rc1-user-1`; subscription to `user.rc1-other-user` was **denied with exactly `out_of_scope`**. `RC1_SOCKET_SIGNED_SCOPE_POLICY=PASS`, exit 0.
+
+An earlier JWT test without explicit `scp` also allowed the own channel, but the foreign-channel request failed with `authorize_timeout` because no authorization API was present. That timeout was **not** accepted as a tenant-isolation proof; the subsequent scoped-token test explicitly tested and passed the local `out_of_scope` rule.
+
+**Limits:** The Redis retry test exercises an intentional transient exception, not permanent failure/dead-letter handling, failed-job persistence, or real Fleetbase business jobs. Signed SocketCluster scope authorization is verified, but not an API-minted real session token, live cross-company business IDOR case, secure publish flow or full-stack failover. Dedicated staging and complete multi-service rollback remain prerequisites for production. `PRODUCTION=NO_GO`.
+
+
+## Permanent Redis job failure persisted into isolated MySQL failed_jobs — PASS (2026-11-10)
+
+The newly versioned `scripts/rc1-isolated-redis-failed-job-persistence.sh` (commit `f8c65437`) was executed **as committed** with `bash -n=PASS` and final exit code **0** on the authorized host. It uses **only disposable synthetic data** and explicitly validates the application's configured `QUEUE_FAILED_DRIVER=database-uuids` error-persistence behavior.
+
+- Docker Redis 7.4 container `--network none`, no published ports, read-only root, 128 MiB RAM, no persistent volume; pinned temporary MySQL 8 container shares this isolated namespace, uses ephemeral `tmpfs` for DB data, a read-only root and 1024 MiB RAM. PHP 8.2 containers (384 MiB max) run the pinned Laravel12 and historical Laravel10 app code read-only, with isolated caches.
+- A source-backed, disposable serialized Laravel queued closure **always raises a synthetic test-only RuntimeException**; dispatched once per runtime via its actual Redis queue. Workers run `artisan queue:work redis --once --tries=1 --backoff=0 --timeout=12`.
+- Laravel12: **1** job enqueued → **1** record in disposable MySQL `fleetbase.failed_jobs` → **0** remaining Redis queued jobs. `RC1_L12_FAILED_JOB_PERSISTENCE=PASS`.
+- Laravel10: identical result, `RC1_L10_FAILED_JOB_PERSISTENCE=PASS`.
+- `RC1_FAILED_JOBS_L12_L10=PASS_EPHEMERAL`; **run exit 0**. Lab source was removed from `/dev/shm`, both test containers were destroyed and verified absent; original production MySQL and Queue remained healthy.
+
+**Scope:** This is genuine Laravel Redis → worker → **MySQL failed-job persistence**, but the `failed_jobs` table was created explicitly in a clean, disposable MySQL database with the expected structure, not proven against a production-size restored database. It does not verify monitoring/alerts, `queue:retry` manual replay, queue ordering, dead-letter procedures or business job effects. End-to-end authenticated tenant/IDOR API scenarios and a full private staging multi-service rollback remain **NOT TESTED**. `PRODUCTION=NO_GO`.
+
+
+## Synthetic two-organization order tenant isolation — list filters AND direct record lookup (2026-11-10)
+
+The committed script `scripts/rc1-two-tenant-synthetic-order-scope.sh` (latest change `6e4eb5f9`) was executed as checked out from the RC1 branch, with `bash -n=PASS` and **exit 0**. Runs separately with the pinned Laravel12 and historical Laravel10 vendors in ephemeral PHP 8.2 containers (`--network none`, read-only application and test script mounts, memory cap 384 MiB, SQLite in-memory only).
+
+The script initializes exactly two fictional tenants (`rc1-company-a`, `rc1-company-b`) and one fictional order in each; it exercises **the actual installed `Fleetbase\\FleetOps\\Http\\Filter\\OrderFilter::queryForPublic`** and **`Fleetbase\\Traits\\HasApiModelBehavior::findRecordOrFail`** with the test session's company set to each tenant:
+
+- A and B each retrieve **only their own order** through the filter despite a forged `company_uuid` query parameter.
+- The direct record lookup retrieves an own order and throws `ModelNotFoundException` for a foreign order; both A→B and B→A denied.
+- **`RC1_TENANCY_L12=PASS_FILTER_AND_DIRECT_LOOKUP`**.
+- **`RC1_TENANCY_L10=PASS_FILTER_AND_DIRECT_LOOKUP`**.
+- Test code removed from `/dev/shm` and no containers left; production app/database remained healthy.
+
+**Important security boundary / outstanding gate:** This synthetic test **sets the session's company explicitly**. The real `findRecordOrFail` source applies the company constraint only if a company is present in the session; it does not prove that authenticating a real client always establishes the correct company context or that all HTTP controllers/routes enforce it. Thus two genuinely authenticated HTTP identities, positive/negative cross-tenant IDOR responses, org-switching and role/permission cases are **NOT TESTED**. Fail-closed behavior when authenticated session company is absent must be separately assessed before production. **Do not mark the HTTP IDOR gate as PASS.** `PRODUCTION=NO_GO`.
+
+
+## SECURITY BLOCKER — tenant-owned direct lookup fails open without an active company; isolated Core API patch candidate (2026-11-10)
+
+**Confirmed unpatched behavior** in the exact pinned `fleetbase/core-api` version used by RC1 (SHA `f81cf74e38f9c11d03d0da6d6bdc9a489c7a52dd`): `HasApiModelBehavior::findRecordOrFail` adds `company_uuid` filtering **only when `session('company')` is populated**, despite the tenant-owned model's column existing. The committed isolated synthetic reproducer `scripts/rc1-two-tenant-synthetic-order-scope.sh` at `8b2c9e99` verified **`RC1_MISSING_COMPANY_LOOKUP_L12=FAIL_OPEN_CONFIRMED`** and the same result under **Laravel10**, while both versions still passed ordinary A↔B scoped filter/lookup tests. This does **not** establish that an actual authenticated HTTP user can reach such a state; that remains an untested gate.
+
+**Candidate fix only, NOT integrated to RC1 composer.lock, NOT deployed:**
+- Fork `gsentsas/core-api`, isolated branch `security/rc1-fail-closed-tenant-lookup-20261110` based on exact pinned Core API SHA.
+- Candidate commit `1a672157d182d5e8edb4ba6a7d8d239828f93a70` updates `src/Traits/HasApiModelBehavior.php` to throw `ModelNotFoundException` for tenant-owned model lookup with absent company **outside CLI**; with a valid company it still applies `where(company_uuid, company)`. CLI/queue behavior is preserved intentionally and needs independent authorization review.
+- **`php -l` PASS**, script probe `bash -n` PASS. The candidate source was mounted **read-only over only the library file** in the otherwise unchanged, pinned Laravel12 and Laravel10 ephemeral PHP containers with `APP_RUNNING_IN_CONSOLE=false` to emulate HTTP application context. Both runtimes passed synthetic A/B tenant list and direct lookup and **missing-company FAIL-CLOSED** checks; candidate HTTP-mode verifier exit **0**.
+- A separate CLI-compatible execution with `APP_RUNNING_IN_CONSOLE=true` confirmed both versions retained the old internal cross-company lookup behavior, as deliberately required for CLI/workers: **exit 0**. The first CLI probe initially returned a nonzero code solely because it still expected the HTTP deny; the assertion was corrected before the successful run.
+- All test-only candidate source files removed from the shared host; **no live application changes, no Composer lock change, no tag, merge or deployment**.
+
+**SECURITY_GATE=NO_GO** pending true authenticated HTTP integration tests proving company context is trustworthy, non-privileged caller cannot select another company's company session, fail-closed on blank session in real HTTP/FPM, and absence of CLI bypass on HTTP contexts. Also review other tenant lookup methods, since this patch only targets `findRecordOrFail`. Do **not** merge the candidate or RC1 PR #6 until those regressions and full-stack staging rollback pass. `PRODUCTION=NO_GO`.
+
+
+## Additional Core API tenant-boundary audit and five-path candidate fix — 2026-11-10
+
+Further inspection of the exact pinned `fleetbase/core-api` trait `HasApiModelBehavior.php` exposed **four related weak paths besides `findRecordOrFail`**:
+
+1. `getById`: conditional `company_uuid` scope only when `session('company')` present.
+2. `updateRecordFromRequest`: same conditional scope on an update target.
+3. `bulkRemove`: same conditional scope on bulk-deletion targets.
+4. `remove`: **no `company_uuid` scope even when the session company was set**.
+
+These are source-level risks; remote exploitation through a fully authenticated HTTP route has **not** been established.
+
+The isolated security candidate branch in `gsentsas/core-api`, `security/rc1-fail-closed-tenant-lookup-20261110`, was extended in commits `00e11d59` and `af969abe` (latter full SHA `af969abec0d2a77b319de9da6c0ebbeca3d2c843`). The candidate now applies a company constraint to `remove` and guards **five methods** against absent tenant session in non-CLI contexts, while preserving explicit CLI/worker compatibility. It has **NOT** been integrated into the pinned RC1 Composer lock.
+
+A reproducible synthetic regression script `scripts/rc1-core-tenant-mutation-candidate-lab.sh` (corrected at commit `940ebb8b`) mounts the candidate Core API source over the original vendor path **read-only** and executes PHP 8.2 + SQLite `:memory:` under Docker `--network none`, separately for pinned Laravel12 and historical Laravel10. The script validates:
+
+- With a company A session, direct deletion and bulk deletion attempts for company B leave **both synthetic orders untouched**.
+- With no active company and simulated non-CLI HTTP context (`APP_RUNNING_IN_CONSOLE=false`), `findRecordOrFail`, `getById`, `updateRecordFromRequest`, `remove`, and `bulkRemove` each **deny** the request, leaving all synthetic orders untouched.
+- **`RC1_L12_MUTATION_AND_FAIL_CLOSED=PASS`**, **`RC1_L10_MUTATION_AND_FAIL_CLOSED=PASS`**, committed script **`bash -n=PASS`, exit 0**.
+- Initial test harness versions did not supply a simulated Laravel route/controller or the expected MySQL-named SQLite resolver. Corrected the **test harness only**; no production source changes.
+- A separate prior candidate regression confirmed scoped A/B direct lookups and preservation of console-mode behavior. Other positive-session `getById` and `updateRecordFromRequest` branches need full database fixture/controller tests; this narrow script tests only their missing-company denial.
+- Temporary candidate source/test files were removed; no running test containers remain, live API/DB still healthy.
+
+**Security gating:** This is a successful **synthetic ORM-level five-path candidate test**, not a real authenticated HTTP two-user IDOR test. The possible risk of bypass through a CLI-context runtime, other lookup methods and actual API session-setting behavior remains to audit. **Candidate NOT MERGED, PR #6 DRAFT, PRODUCTION NO-GO**. Dedicated full-stack staging upgrade/rollback remains required.
+
+
+## Positive-session Core API read/update + cross-company denial candidate regression — 2026-11-10
+
+Updated executable test `scripts/rc1-core-tenant-mutation-candidate-lab.sh` on RC1 branch, final test harness commit `c6495a2e`. It runs the **same candidate source** from fork branch `security/rc1-fail-closed-tenant-lookup-20261110` (Core API candidate SHA `af969abec0d2a77b319de9da6c0ebbeca3d2c843`) read-only over the installed pinned vendor dependency. PHP 8.2 Laravel12 and historical Laravel10 processes use `--network none`, SQLite in memory, two synthetic companies/orders, and `APP_RUNNING_IN_CONSOLE=false`.
+
+The fixture now includes `HasSessionAttributes` and **stubs only `applyDirectivesToQuery`** to bypass the separate authorization-directives database (not included in this minimal fixture). Real `getById`, `updateRecordFromRequest`, `findRecordOrFail`, `remove`, `bulkRemove` methods and their company scopes otherwise run.
+
+- Company A can **read and update its own fictional order**; the updated value is verified.
+- Company A cannot read/update/delete company B's order; company B's original value is verified unchanged.
+- A missing company causes all five direct-lookup/mutation paths to reject, with both rows unchanged.
+- Final source-backed script syntax and execution: `RC1_L12_MUTATION_AND_FAIL_CLOSED=PASS`, `RC1_L10_MUTATION_AND_FAIL_CLOSED=PASS`, **exit 0**.
+- Earlier candidate runs without the full fixture produced test-harness errors (route/controller resolver, missing directives relation, missing `HasSessionAttributes::isSessionAgnosticColumn`). These were **not** marked as PASS; the fixture is now corrected and fully rerun. No production changes; test artifacts cleaned up.
+
+**Strict scope:** This is an ORM/service regression of the candidate only. It does not validate actual API-minted credentials, authorization directives, real HTTP response codes or company-switch logic; those remain `NOT_TESTED`. The candidate remains **unmerged and unpinned**; no change to RC1 Composer dependency locks. Production remains **NO-GO**.
+
+
+## Auth::setSession synthetic identity provenance and absent-company admission — 2026-11-10
+
+The committed `scripts/rc1-api-auth-session-provenance-lab.sh` (`82676d64`) was executed under both pinned Laravel12 and historical Laravel10 code in PHP 8.2 disposable, `--network none`, read-only app mounts, a 384 MiB cap and an array session with no database access. `bash -n=PASS` and full exit code **0**.
+
+The lab calls the genuine `Fleetbase\\Support\\Auth::setSession` with simple synthetic user-like objects (NOT real API credentials or actual Eloquent users) to isolate the session behavior:
+- Identity A with company A produces `session('user')=A` and `session('company')=A`; a forged `company_uuid=B` query parameter is not used to overwrite that session.
+- Initializing identity B replaces both the session user and company with B.
+- **Both runtimes:** `RC1_SESSION_L12=PASS_SYNTHETIC_IDENTITY`, `RC1_SESSION_L10=PASS_SYNTHETIC_IDENTITY`.
+- **Important finding:** calling `Auth::setSession` with a synthetic identity whose `company_uuid=null` still **returns true** and leaves the session company null: `RC1_MISSING_COMPANY_SESSION_L12=ACCEPTED_SECURITY_REVIEW_REQUIRED` and identical result under Laravel10.
+
+**Boundary:** The public API middleware `AuthenticateOnceWithBasicAuth` additionally resolves a bearer token to `ApiCredential` or Sanctum token, checks ownership/expiry and initializes session through `Auth::setSession`. Sanctum also has a separate UUID company check. **This diagnostic does not prove that a real bearer credential can authenticate without a company**, or that API request parameters can bypass middleware. Actual signed credentials, two identities, authorization directives, internal API vs public API, missing-company guard and cross-tenant authenticated HTTP 401/403/404 remain **NOT TESTED**. A candidate patch for five model methods exists on a separate Core API branch and is not installed in RC1 or production.
+
+**Decision:** `SESSION_PROVENANCE_SYNTHETIC=PASS`; `MISSING_COMPANY_ADMISSION=SECURITY_REVIEW_REQUIRED`; `AUTHENTICATED_HTTP_TENANCY=NOT_RUN`; `PRODUCTION=NO_GO`.
+
+
+## Candidate auth-session tenant UUID rejection — Laravel12 and Laravel10 PASS, real HTTP still NOT RUN (2026-11-10)
+
+The existing Core API security candidate branch `security/rc1-fail-closed-tenant-lookup-20261110` was extended at commit **`15b7437908252488b551cf4b0ef8d5c71ff54d81`**. The additional change to `src/Support/Auth.php` rejects missing/non-UUID tenant values **before writing `Auth::setSession`** for both regular user identities and `ApiCredential` objects. It uses the existing `Str::isUuid` helper. This is a **candidate only**, not integrated into RC1's pinned vendor dependency, Composer lock or production.
+
+The newly committed reproducible `scripts/rc1-api-auth-session-candidate-lab.sh` (commit `27b9cbba`) was executed with the patched Auth source mounted read-only over the two pinned Laravel12 and historical Laravel10 vendor trees, using containerized PHP 8.2 `--network none`, read-only code, array sessions and **only synthetic user-like objects and UUIDs**:
+
+- Identity A and identity B with valid synthetic UUID companies establish the expected user/company session: **PASS** on both L12 and L10.
+- Null company is rejected (`setSession() === false`) and does not modify the preceding session: **PASS** on both versions.
+- Malformed company UUID is likewise rejected before any session mutation: **PASS** on both versions.
+- `RC1_SESSION_L12=PASS_SYNTHETIC_IDENTITY`, `RC1_MISSING_COMPANY_SESSION_L12=REJECTED_PASS`, `RC1_MALFORMED_COMPANY_SESSION_L12=REJECTED_PASS` and the equivalent 3 L10 markers all PASS.
+- Script `bash -n=PASS`, Core API candidate `php -l=PASS`, full run **exit 0**. Temporary source file deleted. No real accounts/credentials, external network or production database accessed.
+
+**Strict limitations:** The test invokes the real Auth session method but **not the complete bearer-token middleware, an Eloquent User/ApiCredential authenticated through the database, or actual HTTP**. It therefore does not establish that a particular production bearer token can authenticate with a missing/invalid company, nor that the candidate is safe under actual multi-tenant traffic. A real two-company authenticated HTTP test with full authorization directives, tenant IDOR, API key and Sanctum flows and dedicated full-stack staging rollback remain **NOT RUN**. `PRODUCTION=NO_GO`, candidate NOT MERGED, PR #6 DRAFT.
+
+
+## First real two-bearer HTTP integration on restored SQL — PARTIAL PASS / NO-GO, 2026-11-10
+
+**New executable:** `scripts/rc1-two-bearer-http-isolated.sh`, latest guard change `7c8ff471`. This is the first *actual HTTP* identity and order-access run: pinned Laravel12 API under `php -S` sharing loopback with an **ephemeral MySQL 8 container** (`--network none`, no host ports, readonly application source, RAM caps, tmpfs MySQL data). Restic backup `gstfleet-daily` was restored locally to the ephemeral database (152 tables verified). Two synthetic company/user/API credential/order pairs were inserted **only into the temporary restored DB**, with no real identifiers or tokens printed. The two candidate Core API patches (`Auth.php` and `HasApiModelBehavior.php`) were mounted readonly over the installed vendor files. The initial fixture run failed on circular users/companies foreign keys; insertion was fixed within the disposable database script by temporary FK checks disabled during synthetic inserts and re-enabled before HTTP calls.
+
+**Observed true HTTP responses, company A:**
+- `GET /health` → **200**.
+- Anonymous `GET /v1/orders/rc1-test-order-a` → **401**.
+- Authenticated bearer key A `GET /v1/orders/rc1-test-order-a` → **200**.
+- Authenticated bearer key A `GET /v1/orders/rc1-test-order-b` → **404**.
+- Bearer A `GET /v1/organizations/current` → **500**, a **separate unresolved org-resource / fixture dependency anomaly**.
+- **The script deliberately returned NO-GO (exit 2)** because the org route was required and was 500; company B was **not yet probed**. Thus **`AUTHENTICATED_HTTP_COMPANY_A_ORDER_SCOPE=PASS_OBSERVED`, `AUTHENTICATED_HTTP_TWO_WAY_IDOR=NOT_COMPLETED`**.
+
+The script was revised to assess order IDOR independently from the organization endpoint and to test both A and B (commit `630e05f8`). The next run aborted **before any container started** because the available host memory was around **3.6 GiB**, below the existing 5 GiB safety gate (no swap, production running on the same host). The latest script now emits **`RC1_REAL_TWO_BEARER_HTTP=NO_GO_MEMORY_BELOW_5_GIB`** at that guard (commit `7c8ff471`). **Do not lower the 5 GiB guard or disrupt production to force these tests**. Run the complete two-way test on a dedicated, sufficiently provisioned staging host when available.
+
+**Cleanup and security:** No production migrations, database writes, exposed ports, merged Core API patches, or production restarts. Ephemeral MySQL and HTTP containers and temporary candidate files were removed. Existing production services remain healthy. This is a significant A→B HTTP test result but **not** a complete approval gate. **PR #6 DRAFT; PRODUCTION NO-GO.**
+
+
+## RESOLUTION — Real authenticated two-bearer HTTP read isolation PASS with disposable Redis (2026-11-10)
+
+**Supersedes the earlier partial/no-go outcomes above for the specific *read-only HTTP IDOR* gate.** The reproducible script `scripts/rc1-two-bearer-http-isolated.sh` at fix commit `b4b6f67acf4bba74e81f424177d81d02286fdded` now includes a **private disposable Redis 7.4** in the same Docker `--network none` namespace as the restored MySQL 8 test container and the PHP/Laravel12 HTTP server. Redis is explicitly needed by Fleetbase organization/branding/resource paths; omission caused the previous `RedisException` / HTTP 500 responses. The temporary container name bug in the first Redis-enabled script was fixed before the successful run.
+
+**Successful real HTTP run:** `RC1_AUTH_RESTORED_152=PASS`, `RC1_AUTH_FIXTURES=PASS`, `RC1_AUTH_REDIS_EPHEMERAL=PASS`, `RC1_AUTH_HEALTH=PASS`, `RC1_AUTH_REDIS_FULL_LAB_EXIT=0`. Two synthetic users, companies, API bearer credentials and orders were appended **only to disposable restored MySQL**, whose original customer contents never left the isolated namespace. Both Core API security candidate files (`Auth.php` and `HasApiModelBehavior.php`, branch HEAD `15b7437908252488b551cf4b0ef8d5c71ff54d81`) were mounted read-only over the pinned vendor tree; **neither is integrated in RC1 Composer lock or production**.
+
+| Actual HTTP GET | Token/company A | Token/company B |
+|---|---:|---:|
+| `/v1/organizations/current` | **200** | **200** |
+| Own synthetic `/v1/orders/{id}` | **200** | **200** |
+| Foreign company synthetic `/v1/orders/{id}` | **404** | **404** |
+
+Anonymous GET of an order is **401**; health GET is **200**. Real Fleetbase HTTP middleware, bearer API credential resolution, session company context, controller and authorization flow were exercised (no mocked directives in this HTTP run). The **two-way authenticated HTTP order READ IDOR gate is now PASS on the candidate**. The earlier one-off B→A HTTP 500 was not reproduced in the final complete lab and had been classified NO-GO until this successful final run. Both legitimate own-order reads succeed and cross-company reads return 404.
+
+**Limits and decision:** This is **only GET** on two synthetic orders and with the isolated *candidate* code; it does not cover API authenticated PATCH/PUT/DELETE, permission-role matrices, Sanctum tokens, other resources, tenancy in asynchronous jobs, performance or simultaneous full-stack staging upgrade/rollback. Do not merge the candidate or RC1 solely on this evidence. All temporary PHP, MySQL and Redis containers and candidate files were cleaned up, production services unchanged. **`AUTHENTICATED_TWO_WAY_HTTP_ORDER_READ_IDOR=PASS_CANDIDATE`; `PRODUCTION=NO_GO`.**
+
+
+## Real two-bearer cross-company HTTP PUT/DELETE denied and SQL unchanged — PASS (2026-11-10)
+
+The committed `scripts/rc1-two-bearer-http-write-idempotence-lab.sh` (SHA of introducing commit `c01d45e4ab1d34b10c8933f8948b28b2c8d20831`) extends the previously validated isolated, real HTTP two-bearer test with **actual foreign-company PUT and DELETE** operations. The exact pinned Laravel12 runtime uses restored `gstfleet-daily` MySQL 8 (152 tables), private Redis 7.4 and the two synthetic user/company/credential/order pairs, all in disposable Docker `--network none` containers with no host ports, ephemeral MySQL files, read-only application and candidate Core API sources. The test enforces the host available-memory guard before allocating the lab.
+
+For both bearer A and bearer B:
+- `GET /v1/organizations/current` → HTTP **200**.
+- `GET /v1/orders/{own synthetic order}` → HTTP **200**.
+- `GET /v1/orders/{other-company synthetic order}` → HTTP **404**.
+- `PUT /v1/orders/{other-company synthetic order}` with synthetic note → HTTP **404**.
+- `DELETE /v1/orders/{other-company synthetic order}` → HTTP **404**.
+- After both prohibited writes, query directly in **disposable MySQL** confirms **both synthetic rows remain present, undeleted, original status, and original null notes**, `RC1_SIDE_a=PASS_FOREIGN_PUT_DELETE_NO_DB_EFFECT`, `RC1_SIDE_b=PASS_FOREIGN_PUT_DELETE_NO_DB_EFFECT`.
+
+Anonymous GET order 401, health 200. Markers `RC1_REAL_TWO_BEARER_HTTP_ORDER_IDOR=PASS` and `RC1_REAL_TWO_BEARER_HTTP_FOREIGN_PUT_DELETE=PASS`; test `bash -n=PASS` and final **exit 0**. Only HTTP codes and synthetic invariants are logged; no customer rows, tokens or response bodies printed. All ephemeral containers and temporary candidate files cleaned.
+
+**Scope:** This is real two-company, bearer API key HTTP cross-tenant **read, PUT, DELETE denial** with a preserved database, on the **unmerged candidate patch**, not on the deployed code. Positive own-company PUT/DELETE, role/permission matrices, Sanctum flows, absent-company HTTP route tests, other model types, complete multiservice staging and rollback remain NOT TESTED. **Do not merge/tag/deploy** on this result alone; PR #6 DRAFT, production NO-GO.
+
+
+## Authenticated own-order PUT/DELETE positive-path rehearsal — PARTIAL PASS, 2026-11-10
+
+**Source committed:** `scripts/rc1-two-bearer-http-own-write-lab.sh`, initial commit `60c0b5a5`, sequential state corrections `63ac2e60` (own PUT) and `831e2c8f98400979a6eeb00bd2c0a150dd6b8f36` (own DELETE). The script reuses the validated fully isolated, real HTTP two-bearer lab: pinned Laravel12 API, the **unmerged** Core API candidate readonly overrides, Restic-restored ephemeral 152-table MySQL, throwaway Redis, two synthetic companies/users/keys/orders, `--network none`, no published ports, memory limits and temporary-only storage.
+
+**Actual HTTP/SQL results from the first two isolated executions:**
+- Authenticated foreign-company GET/PUT/DELETE remains **404** in both directions, with no unintended database changes (**PASS**, previously separately verified).
+- Company A own-order HTTP PUT **200**, SQL `notes` updated to the synthetic test value (**PASS**).
+- Company B own-order HTTP PUT **200**, SQL `notes` updated to the same synthetic test value (**PASS**); the first test run incorrectly expected company A's note to be null after A had legitimately changed it. Corrected the sequential fixture assertion, then retested to PASS.
+- Company A own-order HTTP DELETE **200**, corresponding row soft-deleted in disposable SQL (**PASS**).
+- Company B own-order HTTP DELETE **200** was observed, but the script **did not reach a successful final SQL assertion** because it incorrectly expected A's row to be still active after the preceding legitimate A deletion. The test harness was corrected and now asserts both expected prior states plus two final soft-deleted rows. **Do not mark B's own DELETE SQL as PASS yet.**
+- The corrected final script `bash -n=PASS`; the next run was rejected by the host RAM preflight: **`RC1_REAL_TWO_BEARER_HTTP=NO_GO_MEMORY_BELOW_5_GIB`**, exit 2 **before any test container started**. Host memory available at last check ~4.2 GiB; no swap. Production Fleetbase services remain healthy. Do not lower this guard or stop any production service.
+
+**Decision:** `AUTHENTICATED_OWN_PUT_A_B=PASS`, `AUTHENTICATED_OWN_DELETE_A=PASS`, `AUTHENTICATED_OWN_DELETE_B_HTTP_200_OBSERVED_SQL_PROOF=PENDING`, `CORRECTED_FULL_OWN_WRITE_GATE=NOT_COMPLETED_DUE_MEMORY`; **PR #6 DRAFT, candidate NOT INTEGRATED, PRODUCTION NO-GO**. Next run must be on sufficiently provisioned staging or after free host RAM exceeds the existing safe threshold, without production disruption.
+
+
+## FINAL RESOLUTION — Two-bearer authenticated OWN and FOREIGN HTTP GET/PUT/DELETE PASS (2026-11-10)
+
+**This supersedes the preceding PARTIAL PASS/NO-GO entry for the own-tenant positive PUT/DELETE test.** The exact committed regression script `scripts/rc1-two-bearer-http-own-write-lab.sh` at revision `831e2c8f98400979a6eeb00bd2c0a150dd6b8f36` was rerun after the production host's available memory returned above the strict 5 GiB guard (about 6.0 GiB at preflight). `bash -n=PASS`, full run **EXIT 0**. No safety limit was lowered.
+
+The isolated lab used the same pinned Laravel12 HTTP runtime and the unmerged Core API candidate read-only overrides, two real test bearer API keys for two fictional companies, Restic-restored disposable MySQL8 with 152 tables and throwaway Redis7.4. All three containers operated with `--network none`, no published ports, read-only API source, resource caps, tmpfs MySQL data and no connection to live service databases.
+
+**Full successful assertions for both companies A and B:**
+- Own order `GET` HTTP **200**, foreign order `GET` HTTP **404**.
+- Foreign `PUT` HTTP **404** and foreign `DELETE` HTTP **404**, with both fictional rows initially unchanged (`notes IS NULL`, `deleted_at IS NULL`, original status).
+- Own `PUT` HTTP **200**; SQL verified each company's order notes exactly changed to the synthetic expected value, while the other organization's row retained its expected prior value.
+- Own `DELETE` HTTP **200** for **both** A and B. SQL confirms `deleted_at IS NOT NULL` for each independently; the final assertion confirms both fictional orders soft-deleted and both carrying the expected previously authorized notes.
+- Anonymous GET returns HTTP **401**; `GET /v1/organizations/current` returns HTTP **200** with either bearer.
+
+Verified markers: `RC1_SIDE_a=PASS_OWN_PUT_DB_EFFECT`, `RC1_SIDE_b=PASS_OWN_PUT_DB_EFFECT`, `RC1_SIDE_a=PASS_OWN_DELETE_SQL`, `RC1_SIDE_b=PASS_OWN_DELETE_SQL`, `RC1_FINAL_TWO_OWN_SOFT_DELETES=PASS`, `RC1_REAL_TWO_BEARER_HTTP_OWN_PUT_DELETE=PASS`, `RC1_REAL_TWO_BEARER_HTTP_ORDER_IDOR=PASS`, `RC1_REAL_TWO_BEARER_HTTP_FOREIGN_PUT_DELETE=PASS`, **exit 0**.
+
+**Scope and decisions:** `AUTHENTICATED_TWO_BEARER_ORDER_HTTP_GET_PUT_DELETE=PASS_CANDIDATE`, covering **both permitted and forbidden cross-tenant paths** for two synthetic orders and actual API credential middleware. This does not approve the overall RC1 release: permission/role matrix, Sanctum tokens, missing-company real HTTP cases, other tenant-owned resources, fault injection and full multi-service staging rollback remain to be completed. The Core API patch has **not been merged/pinned**, PR #6 remains DRAFT and **PRODUCTION=NO_GO**.
+
+
+## Public API-key vs internal Sanctum roles/permissions source boundary — PASS_SOURCE_ONLY (2026-11-10)
+
+New reproducible offline, read-only audit `scripts/rc1-authz-route-boundary-source-audit.sh` at commit `3c33ae29e8e80483f606ea6a50bfd81a30cd63d7`, run directly against the **pinned** installed Core API/FleetOps sources on the authorized host for Laravel12 and Laravel10. Shell syntax `bash -n=PASS`, audit final **exit 0**; nine explicit route, middleware and guard checks per version:
+
+- FleetOps **public** `v1/orders` GET/PUT/DELETE routes are registered inside `fleetbase.api`, whose middleware includes `AuthenticateOnceWithBasicAuth` (API bearer authentication). The route group has **no `fleetbase.protected` / `AuthorizationGuard`**. Prior two-bearer live HTTP checks prove tenant ownership for **synthetic orders with API keys**, not per-user Sanctum permissions or a separate public-API authorization role gate.
+- FleetOps **internal** order routes register within `fleetbase.protected`: `auth:sanctum`, `SetupFleetbaseSession`, `AuthorizationGuard`, plus other middleware. `AuthorizationGuard` calls `Auth::resolvePermissionsFromRequest`, which uses controller/resource names and `Permission::findByNames`, and rejects non-admin users missing **resolved nonempty** required permissions.
+- **Important potential fail-open boundary:** guard condition checks `$requiredPermissions->isNotEmpty()`; if the permission resolver returns empty for a *guarded* sensitive route (missing catalog, wrong resource/action mapping, `SkipAuthorizationCheck`, or unguarded config), no role-based rejection is performed. This is a source-derived potential requiring executed negative role-matrix tests, **not a demonstrated vulnerability in production**.
+- `RC1_L12_AUTHORIZATION_BOUNDARIES=PASS_SOURCE_ONLY` and `RC1_L10_AUTHORIZATION_BOUNDARIES=PASS_SOURCE_ONLY` (9/9 structural assertions each). `RC1_APIKEY_ROLE_MATRIX=NOT_TESTED`, `RC1_SANCTUM_ROLE_MATRIX=NOT_TESTED`.
+
+A `php artisan route:list --json` container attempt did not produce parseable JSON, so it was **not** claimed as runtime route evidence; the successful audit reads pinned source files without any application or database mutations. A proper test matrix must evaluate non-admin users with no permissions, narrow read-only grants, explicit create/update/delete grants, and admin privileges under real Sanctum authentication and the restored permission catalog. The public API-key policy also needs an explicit product-level decision on what capabilities an issued key is intended to grant.
+
+**Decision:** `AUTHZ_ROUTE_BOUNDARY_AUDIT=PASS_SOURCE_ONLY`; `INTERNAL_ROLE_PERMISSION_BEHAVIOR=NOT_RUN`; `PRODUCTION=NO_GO`, PR #6 DRAFT, Core API fix candidate not merged.
+
+
+## Sanctum internal IAM-role HTTP diagnostic — BLOCKED (2026-11-10)
+
+The committed `scripts/rc1-sanctum-two-profile-http-diagnostic.sh`, latest fixture commit `7532a2d44aef06fe9543975b4af6d7280d325c48`, was executed several times on the same **offline disposable** Laravel12+MySQL8+Redis7.4 HTTP lab with the pinned Core API security candidate read-only overrides. It added two synthetic Sanctum personal access tokens to the ephemeral, restored 152-table MySQL: one non-admin with no explicit roles/permissions and one synthetic `type=admin`. This run is deliberately diagnostic and **does not assert the role matrix PASS**.
+
+Progressive fixture findings:
+- Original synthetic token rows incorrectly used numeric `users.id` for `personal_access_tokens.tokenable_id`; Fleetbase migrates this to the user **UUID**, despite Sanctum's default migration. Fixed at commit `9e69ce50`.
+- With UUID tokenable IDs but no `company_users` entries: non-admin `GET int/v1/orders` and `GET int/v1/orders/{id}` returned **500**, and only the exception **class** `BadMethodCallException` was emitted by the diagnostic logger; the admin returned **401**. This is not a valid role denial.
+- On the next run, created proper **synthetic company memberships**, one per test identity, **without assigning any role or permission**, commit `7532a2d4`. The `BadMethodCallException` no longer occurred, but **both non-admin and admin now returned 401 for internal list and detail GET**. Therefore both profiles were blocked before reliable role-authorization verdicts; the expected distinction between unauthorized role (403) and authorized admin/read-only role (200) is **not established**.
+- Public API credential controls in each disposable run remained successful (A/B own-order **200**, foreign-order **404**, anonymous **401**, organization current **200**) and are distinct from Sanctum IAM tests.
+- Each diagnostic script exited **0 by design after collecting response codes**, **NOT** because Sanctum authentication or permission matrix passed. The candidate remains unmerged.
+
+Source inspection: Fleetbase `User` uses UUID as its Eloquent primary key and its IAM permission helpers proxy through `companyUser`. `AuthorizationGuard` only checks nonempty permission sets for non-admin users. Application `config/auth.php` currently sets the `users` provider model to `App\\Models\\User` whereas Fleetbase uses `Fleetbase\\Models\\User`; determine how the real runtime's Sanctum auth provider, morph type mapping, company membership, MFA and current-access-token context interact **before** proposing configuration changes. Do not infer from 401 alone that the production IAM is insecure.
+
+**Decision:** `SANCTUM_TWO_PROFILE_HTTP_DIAGNOSTIC=EXECUTED`; `SANCTUM_AUTHENTICATION=NOT_VALIDATED`; `IAM_ROLE_PERMISSION_MATRIX=NO_GO`; `PUBLIC_BEARER_HTTP_TENANT_IDOR=PREVIOUSLY_PASS_CANDIDATE`. Next: validate **correctly minted** Sanctum tokens and the exact auth provider/tokenable model, then no-role/read-only/editor/admin negative/positive HTTP rights with SQL unchanged invariants; full-stack staging rollback still required. **PR #6 DRAFT, PRODUCTION NO-GO**.
+
+
+## RESOLUTION — Real Sanctum minted token, admin vs no-role internal HTTP authorization PASS (2026-11-10)
+
+**This supersedes the prior Sanctum `401` authentication uncertainty for the two examined IAM profiles.** Fleetbase's `Laravel\\Sanctum\\HasApiTokens::createToken` must be used with the actual `Fleetbase\\Models\\User` (UUID primary key); the synthetic manually inserted tokens are not a sufficient authentication proof. The committed script `scripts/rc1-sanctum-two-profile-http-diagnostic.sh` at `457355fb431bd12e8c53e32f92ab17375e3d8279` now mints **genuine Sanctum tokens in the disposable app** using `User::createToken()` and sends their Bearer headers into **actual `int/v1/orders` HTTP**. Tokens remain in shell variables, never printed. The test uses the pinned Laravel12 runtime and the **unmerged** Core API candidate read-only overrides, restored private 152-table MySQL8, private Redis7.4, 2 fake company memberships and 2 fake user profiles. Docker `--network none`, no host ports, strictly synthetic operations, RAM guard, full cleanup.
+
+**Actual tested internal endpoints, with explicit required assertions and SQL proof:**
+- Non-admin company A **with no company role or permissions**: `GET int/v1/orders` **401**, `GET int/v1/orders/rc1-test-order-a` **401**. Both responses were specifically classified **`PERMISSION_DENIED`** from Fleetbase `authorizationError()` response (Fleetbase uses HTTP 401 for an authorization refusal). This is *not* a Sanctum authentication failure.
+- That same non-admin A: `PUT int/v1/orders/rc1-test-order-a` **401**, `DELETE int/v1/orders/rc1-test-order-a` **401**.
+- Disposable SQL after all forbidden attempts: both fictional orders remain unmodified, undeleted, original status; `RC1_SANCTUM_NO_ROLE_MUTATIONS=PASS_SQL_UNCHANGED`.
+- Admin identity B (`type=admin`): `GET int/v1/orders` **200**; `GET int/v1/orders/rc1-test-order-b` **200**; attempting to read company A's order → **404** (tenant boundary still applies).
+- Genuine token issuance marker `RC1_SANCTUM_REAL_CREATE_TOKEN=PASS`, enforced `RC1_SANCTUM_ADMIN_NO_ROLE_HTTP_MATRIX=PASS`. Script final **exit 0**, `bash -n` PASS.
+
+These checks use actual `auth:sanctum`, `SetupFleetbaseSession`, `AuthorizationGuard`, permission catalog and public/internal route controllers. The earlier `BadMethodCallException` came from synthetic users without `company_users` membership and was resolved in the ephemeral fixture; earlier 401 responses on manually constructed tokens were misleading until `User::createToken` was used.
+
+**Limits:** Admin/no-role matrix is PASS on the candidate in the isolated laboratory only; **read-only, editor, granular Spatie permissions, internal admin writes, other resources, no-company real Sanctum token and full-stack staging upgrade/rollback remain NOT TESTED**. No Core API merge or RC1 composer.lock integration; PR #6 DRAFT, production NO-GO.
+
+
+## RESOLUTION — Real four-profile Sanctum IAM read/editor permission matrix PASS (2026-11-10)
+
+The executable `scripts/rc1-sanctum-four-profile-iam-lab.sh` (commit `422faaaa3d09ad9a774de26b2a6563dd35f2e487`) successfully executed **actual HTTP** across four synthetic user permission profiles: no role/no permissions, reader, editor, and administrator. Exact pinned Laravel12 runtime plus **unmerged Core API security candidate** were tested in the established **fully isolated** networkless Docker lab with Restic-restored disposable MySQL8 (152 tables), private Redis7.4, no exposed ports, memory guard, read-only source and all test data synthetic. Genuine Sanctum tokens were minted using `Fleetbase\\Models\\User::createToken` inside the lab. Spatie permission grants were made **only on the synthetic reader/editor `company_users` records**: reader = `fleet-ops list order` and `fleet-ops view order`; editor = reader permissions plus `fleet-ops update order`. These exact permission names existed in the restored catalog. No production IAM records changed.
+
+**Observed HTTP responses:**
+- Non-admin **no-role**: internal GET/list, GET/own, PUT/own and DELETE/own all **401 permission denied** (Fleetbase's authorization error uses 401); SQL preserved.
+- **Reader**: GET/list **200**, GET/own **200**, GET/foreign tenant order **404**, PUT/own **401**, DELETE/own **401**; SQL unchanged.
+- **Editor**: GET/list **200**, GET/own **200**, GET/foreign tenant order **404**, DELETE/own **401**, PUT/own **200**; disposable SQL confirmed that only the reader/editor company's own fictional order acquired the explicitly expected synthetic note.
+- **Admin**: GET/list **200**, GET/own **200**, GET/foreign **404**. Admin internal PUT/DELETE were **not** exercised in this run.
+- Independent API-key A/B bearer GET own **200** and cross-company **404** remained PASS in the same lab.
+- Assertion markers `RC1_IAM_GRANTS=PASS`, `RC1_IAM_READER_EDITOR_TOKENS=PASS`, `RC1_SANCTUM_ADMIN_NO_ROLE_HTTP_MATRIX=PASS`, **`RC1_SANCTUM_FOUR_PROFILE_IAM=PASS`**, final **exit 0**; no real tokens or client rows printed and temporary containers removed.
+
+**Scope and decision:** `SANCTUM_INTERNAL_ORDER_FOUR_PROFILE_READ_UPDATE_DELETE_AUTHZ=PASS_CANDIDATE`. Coverage is on synthetic orders and specific role permissions in the candidate-only Laravel12 lab; admin authorized writes, permission-catalog omission/empty-set fail-open, absent-company Sanctum real HTTP, broader resource policy, Core API composer pin/CI, dedicated multiservice staging and rollback are **still outstanding**. PR #6 remains DRAFT, production NO-GO.
+
+
+## CONFIRMED fail-open authorization on missing permission catalog + candidate fail-closed fix (2026-11-10)
+
+**This is an executed authenticated HTTP security finding (not merely source-level suspicion).** Test `scripts/rc1-sanctum-permission-catalog-omission-lab.sh`, introduced at commit `d79562ba` and corrected at `b490ca22`, extends the passed 4-profile genuine Sanctum IAM matrix in a **disposable** Laravel12 app with restored private MySQL8 (152 tables) and Redis7.4. It renames the `fleet-ops view order`, `fleet-ops * order`, and `fleet-ops *` entries **only in the disposable MySQL catalog**, leaving SQL directive foreign keys intact (direct deletion was blocked by expected `directives_permission_uuid_foreign`, not treated as a security verdict). After the baseline no-role user was correctly denied HTTP 401, the same real authenticated no-role Sanctum token received **HTTP 200 on `GET int/v1/orders/rc1-test-order-a`** with the relevant permission names missing. `RC1_MISSING_PERMISSION_CATALOG=VULNERABILITY_FAIL_OPEN_CONFIRMED`, diagnostic exit 0 **means vulnerability reproduction succeeded, NOT a security PASS**. This exposes the guard's `$requiredPermissions->isNotEmpty()` dependency; role-based checks are skipped when no required permission is resolved. Production exploitability depends on whether the permission catalog is incomplete or corrupt; no production permission entries were modified and no cross-tenant reading was demonstrated in this test.
+
+**Candidate patch**, Core API branch `security/rc1-fail-closed-tenant-lookup-20261110`, commit `c7f377c87f9db9251bfee8a29325c86bc973de13`, file `src/Http/Middleware/AuthorizationGuard.php`: for non-admin users and controllers with a permission-bearing resource, if no required permissions resolve, reject via existing `authorizationError()` whenever the resource has other guardable permission entries; independently, `order` is explicitly always guarded even if its **entire catalog** is missing. Respects `SkipAuthorizationCheck` and leaves existing admin and normal granted-role behavior intact. **Scope limitation**: a different resource whose entire catalog disappears remains potentially fail-open, since only orders are guarded unconditionally by name; broader protected-resource policy needs review before release.
+
+**True HTTP regression**, script `scripts/rc1-sanctum-permission-catalog-fail-closed-candidate-lab.sh` at `7a927f2921194b5a85d136dbbec6edf9779207bb`. The patched guard was mounted read-only over pinned vendor inside the same networkless, tmpfs MySQL/Redis Docker lab; `bash -n` PASS, PHP syntax `php -l` PASS and full run **exit 0**. With catalog intact, the established real Sanctum four-profile matrix (no-role, reader, editor, admin) remained **PASS**, including reader/editor write-denial and editor's permitted PUT with SQL effects. After removing the permission *names* while preserving FK records, results were `RC1_PARTIAL_CATALOG_NO_ROLE=401 READER=401 ADMIN=200`, `RC1_PARTIAL_PERMISSION_FAIL_CLOSED=PASS`. After renaming all catalog entries ending in ` order`, results were `RC1_FULL_CATALOG_NO_ROLE=401 ADMIN=200`, `RC1_FULL_PERMISSION_FAIL_CLOSED=PASS`, `RC1_MISSING_PERMISSION_GUARD_CANDIDATE=PASS`. The prior unpatched no-role HTTP 200 was therefore corrected to 401 **for the tested order routes**.
+
+Both scripts enforce a host RAM preflight and ephemeral `--network none` Docker with no published ports, read-only product source, disposable credentials/records, SQL restoration isolated from live data, and cleanup of temporary container and candidate PHP files. No merge, Composer lock update, deployment, production permission/catalog change, service restart or tag.
+
+**Release decision:** `MISSING_ORDER_PERMISSION_FAIL_OPEN=REPRODUCED_UNPATCHED`, `ORDER_GUARD_FAIL_CLOSED_CANDIDATE=PASS_HTTP`, `OTHER_RESOURCES_CATALOG_ABSENCE=NOT_COVERED`, `RC1_COMPOSER_PIN_AND_CI=NOT_DONE`, `FULL_STACK_STAGING_ROLLBACK=NOT_DONE`. **PR #6 DRAFT; PRODUCTION NO-GO.**
+
+
+## Generalized protected resource authorization fail-closed — Orders AND Contacts PASS HTTP (2026-11-10)
+
+**Candidate Core API fix** on `security/rc1-fail-closed-tenant-lookup-20261110`, commit `e2076d396af95dbe77823f670cd50d4f12671e0c`, modifies `src/Http/Middleware/AuthorizationGuard.php`. Instead of treating `order` as a special case and checking `Auth::isResourceGuarded` (which fails when the entire catalog is missing), **any non-admin request to a controller declaring `getResourceSingularName` in the protected middleware is rejected if `Auth::resolvePermissionsFromRequest` returns an empty set**, except methods with explicit `SkipAuthorizationCheck`. Legacy behavior is deliberately retained for controllers **without** this resource contract, pending route classification; those are not proven fail-closed by this change. Existing non-empty required-permission checks remain unchanged, and admin paths continue their existing behavior. **Exemptions' live HTTP behavior requires a separate compatibility test; only source-level preservation was verified here.**
+
+**Reproducible lab** `scripts/rc1-sanctum-multi-resource-catalog-fail-closed-lab.sh` created at commit `30432d7f0af1ff7ad1aef93a21560a129a593c08`. Executed with the exact pinned Laravel12 runtime, security candidates for Core API session and tenant lookup, and new guarded middleware all mounted **read-only** over installed vendor; no Composer lock integration. MySQL8 restored from Restic (152 tables), Redis7.4, PHP HTTP all disposable with Docker `--network none`, no published ports, resource quotas, synthetic identities and a 5GiB host RAM preflight. `bash -n=PASS`, candidate middleware `php -l=PASS`, final **EXIT 0**.
+
+**Observed true HTTP and SQL checks**:
+- Normal catalog, genuine Sanctum tokens and 4 IAM profiles: `RC1_SANCTUM_FOUR_PROFILE_IAM=PASS`, including no-role denial, reader permitted reads but forbidden PUT/DELETE, editor permitted PUT verified with disposable SQL, admin permitted own read, foreign read hidden.
+- Omitted exact/wildcard permissions for orders, with FK-constrained permission UUID rows left intact: `RC1_PARTIAL_CATALOG_NO_ROLE=401 READER=401 ADMIN=200` → **PASS**.
+- Entire order permission catalog names omitted: `RC1_FULL_CATALOG_NO_ROLE=401 ADMIN=200` → **PASS**.
+- **Entire contact permission catalog names omitted**: `RC1_FULL_CONTACT_CATALOG_NO_ROLE=401 READER=401 ADMIN=200` → `RC1_CONTACT_RESOURCE_FAIL_CLOSED=PASS`, proving behavior beyond orders.
+- `RC1_MISSING_PERMISSION_GUARD_CANDIDATE=PASS_MULTI_RESOURCE`, script EXIT 0; no production writes, merges, tags or restarts. Temporary containers, credentials and guard candidate source removed after test.
+
+**Remaining gates:** audit/HTTP regressions for intentional `SkipAuthorizationCheck` exemptions and controllers lacking a resource contract; verify other protected resources and high-risk actions, add the candidate Core API commit to a reproducible RC1 dependency pin, complete CI and full multi-service staging upgrade/rollback. `PRODUCTION=NO_GO`; PR #6 DRAFT, security fix not integrated.
+
+
+## Explicit authorization exemptions and non-resource SearchController — targeted HTTP/source validation (2026-11-10)
+
+**Reproducible HTTP:** `scripts/rc1-sanctum-exempt-and-search-http-lab.sh` introduced at commit `de5c598705487f28ffc4b23269ff716c9b34f876`. Real Laravel12 protected HTTP with genuine Sanctum tokens, the **unmerged** generalized Core API `AuthorizationGuard` candidate `e2076d39` mounted read-only, ephemeral private MySQL8 restored from Restic (152 tables), private Redis7.4, Docker `--network none`, no published ports, synthetic only. The baseline 4-profile IAM matrix remained PASS, as did order/contact complete catalog-omission fail-closed regression. Script **EXIT 0**.
+
+**Safe exemption probe:** `PATCH int/v1/orders/route/rc1-nonexistent-order` with empty JSON and an intentionally nonexistent order, on the method `OrderController::editOrderRoute` annotated `#[SkipAuthorizationCheck]`: no-role user **HTTP 401**, admin **HTTP 400** (business path reached with nonexistent test identifier). The 401 is consistent with a **separate explicit per-method IAM check**; this annotation only bypasses the generic guard, not `FleetOps\\Traits\\AuthorizesMethods`. The controller maps `editOrderRoute` to `update-route-for order` and registers a middleware calling `Authorization::authorize`. These tests do **not** mutate a valid order or prove all exempt methods are properly protected.
+
+**Non-resource controller probe:** `GET int/v1/search?q=rc1-test-order&types=orders` with no-role token returned a JSON **empty results array**, while admin returned a valid JSON results shape. The `SearchController` is not a Fleetbase resource controller; it enforces explicit per-type `Auth::can('fleet-ops see order')` and applies `company_uuid=session('company')` to its order query. Only the tested search path is covered. The separate synthetic order row remained unchanged after exemption and search probes, `RC1_EXEMPT_AND_SEARCH_SQL=PASS`.
+
+**Pinned reproducible source proof:** `scripts/rc1-exemption-nonresource-source-audit.py` (commit `a5b61f66c197e63cff785ac4c472897ce8c10d90`) executed read-only against the exact Laravel12 pinned vendor tree: **9/9 source checks PASS**, Python compile PASS, audit exit 0, including route, explicit method annotation, methodPermissions, AuthorizesMethods middleware, SearchController authorization filter and tenant-scoped query. The audit intentionally emits `RC1_ALL_PROTECTED_NONRESOURCE_CONTROLLERS=NOT_AUDITED`; it does not certify all internal controllers or all explicit exemptions.
+
+**Decision:** `EXEMPT_EDIT_ORDER_ROUTE=PASS_TARGETED_HTTP_COMPATIBILITY`, `NONRESOURCE_SEARCH=PASS_TARGETED_HTTP_TENANT_AND_PERMISSION_FILTER`, `ALL_EXEMPTIONS_AND_NONRESOURCE_CONTROLLERS=NOT_AUDITED`; do not merge the generalized Core API guard or update the RC1 Composer lock until route/exemption inventory and compatibility assessment are satisfactory. **PR #6 DRAFT; PRODUCTION NO-GO**; no production changes.
