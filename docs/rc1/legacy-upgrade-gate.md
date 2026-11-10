@@ -44,3 +44,19 @@ Missing image digest or migration plan; insufficient disk/RAM; any production en
 5. Obtain an explicit production change gate before any merge, deployment, database migration or switch of real traffic.
 
 **Current decision:** `S2_REAL_SQL_RESTORE=PASS`, `S3_THREE_FORK_MAPPING=PASS_WITH_ONE_PENDING`, `S4_SYNTHETIC_UPGRADE=PASS`, `S7_SYNTHETIC_SQL_RECOVERY=PASS`, `S4_REAL_DATA_UPGRADE=NOT_RUN`, `S7_FULL_APP_ROLLBACK=NOT_RUN`, `PRODUCTION=NO_GO`.
+
+
+## Capacity recheck after host cleanup — 2026-11-10
+
+A **fresh read-only** run of `scripts/rc1-private-staging-capacity-gate.sh` changed the disk assessment, not the release decision:
+
+| Candidate | Free disk | Disk used | Available host RAM | Production services | Gate |
+|---|---:|---:|---:|---|---|
+| Mac Docker Desktop | ~11 GiB | ~95% | macOS host memory not attested; Docker ~7.75 GiB | none | **NO-GO** |
+| `mail01` shared server | **228 GiB** | **68%** | ~5.0 GiB | **8 live `gstfleet` containers** | **NO-GO** |
+
+The server's free disk increased considerably since the prior observation (~50 GiB). This is independently observed system capacity and **must not be attributed to our earlier cache cleanup**. The script's **disk thresholds now PASS on mail01**, but RAM and isolation gates fail. No second stack or customer-data upgrade was launched, no snapshot moved, and live production was not restarted.
+
+**Feasible next research:** a deliberately constrained, private single-use restore/migration proof on dedicated compute or a proven isolated disposable environment with strict CPU/memory quotas, no public ports, no external side effects and independent old/new application artifacts. Such a proof still needs explicit full rollback and validated capacity. The presence of free disk alone is **not authorization** to run it on the shared production server.
+
+**Current production decision: NO-GO.**
