@@ -133,9 +133,9 @@ print(hits[0])
       FROM information_schema.triggers
       WHERE TRIGGER_SCHEMA='$name';
   ")
-  indexes=$(printf '%s\\n' "$meta" | sed -n '1p')
-  fks=$(printf '%s\\n' "$meta" | sed -n '2p')
-  triggers=$(printf '%s\\n' "$meta" | sed -n '3p')
+  indexes=$(printf '%s\n' "$meta" | sed -n '1p')
+  fks=$(printf '%s\n' "$meta" | sed -n '2p')
+  triggers=$(printf '%s\n' "$meta" | sed -n '3p')
   [[ "$indexes" =~ ^[0-9]+$ && "$fks" =~ ^[0-9]+$ && "$triggers" =~ ^[0-9]+$ ]] || {
     echo "RC1_RESTORE_METADATA_$name=NO_GO"; exit 2;
   }
