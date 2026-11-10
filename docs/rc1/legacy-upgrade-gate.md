@@ -171,3 +171,20 @@ Pinned runtime artifacts:
 - No leftover `gst-rc1-*` lab containers at postflight; 8/8 Fleetbase production containers remain Up, backup/offsite latest Result=success, production checkout unchanged at `67b2db64`.
 
 **Remaining gates:** This proves a **three-DB real-data upgrade/recovery plus pinned Laravel 10 CLI boot**, NOT an end-to-end HTTP/socket/queue/worker restore, full application traffic switch or production rollback. It does not fully prove post-upgrade tenant-level business invariants or external service isolation in a real multi-container staging topology. Therefore **PR #6 remains DRAFT; production GO/NO-GO = NO-GO** until a formal dedicated staging full-stack E2E rehearsal and change approval.
+
+
+## Real-data preservation across Laravel 12 migration: exact historical table row-count gate (2026-11-10)
+
+The committed script `scripts/rc1-real-laravel10-rollback-rehearsal.sh` (change `5e2779ee`) was executed again against the same pinned encrypted real-data snapshot in the networkless disposable lab.
+
+A new safety invariant computes SHA-256 of **exact `COUNT(*)` results from every existing historical base table** in each of `fleetbase`, `fleetbase_sandbox` and `fleetbase_storefront`, before migration and immediately after Laravel12 migrations. The `migrations` registry is excluded because one migration is legitimately added; the new telematic receipts table did not exist in the historical table set. The SQL output is hashed on the private host and **neither row data, table names nor individual counts are printed**.
+
+- `RC1_S4_HISTORICAL_TABLE_ROW_COUNT_INVARIANTS_fleetbase=PASS`.
+- `RC1_S4_HISTORICAL_TABLE_ROW_COUNT_INVARIANTS_fleetbase_sandbox=PASS`.
+- `RC1_S4_HISTORICAL_TABLE_ROW_COUNT_INVARIANTS_fleetbase_storefront=PASS`.
+- `RC1_S4_THREE_DATABASES_HISTORICAL_ROW_COUNTS=PASS`.
+- Subsequent rollback of the three SQL databases to the pre-upgrade state: **three canonical SQL content hashes matched**.
+- Pinned historical Laravel10 CLI: `artisan migrate:status` and `artisan route:list --json` both PASS on those restored databases.
+- **Full script exit 0**, ephemeral container removed, production API and MySQL remain healthy.
+
+**Scope clarification:** exact row-count equality is stronger than table counts but cannot detect altered values when the number of rows stays constant. Neither full per-row business-value diff nor actual HTTP/queue/socket/worker rollback was performed. Production remains NO-GO pending full-stack private staging validation and authorized change gate.
