@@ -237,6 +237,50 @@ for name in fleetbase fleetbase_sandbox fleetbase_storefront; do
   echo "RC1_S4_HISTORICAL_ROW_VALUES_$name=PASS"
 done
 echo "RC1_S4_THREE_DB_HISTORICAL_ROW_VALUES=PASS"
+# HTTP smoke in the same *networkless* namespace as restored MySQL.
+# A PHP builtin server is used only for this ephemeral GET /health probe.
+# No external ports, no response body or customer data recorded.
+http_health_probe() {
+  local app_path="$1" db_name="$2" phase="$3"
+  local http_name="gst-rc1-http-${BASHPID}-${phase}"
+  docker run -d --rm --name "$http_name" --network "container:$container" \
+    --memory 512m --memory-swap 512m --cpus 1 --pids-limit 96 \
+    --read-only --security-opt no-new-privileges \
+    --tmpfs /tmp:rw,nosuid,nodev,size=32m \
+    --tmpfs /fleetbase/api/storage:rw,nosuid,nodev,size=64m \
+    --tmpfs /fleetbase/api/bootstrap/cache:rw,nosuid,nodev,size=16m \
+    --mount "type=bind,source=$app_path,target=/fleetbase/api,readonly" \
+    -w /fleetbase/api --entrypoint php \
+    -e APP_ENV=testing -e APP_URL=http://localhost.test \
+    -e APP_KEY=base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= \
+    -e DB_CONNECTION=mysql -e DB_HOST=127.0.0.1 -e DB_PORT=3306 \
+    -e DB_DATABASE="$db_name" -e DB_USERNAME=root -e DB_PASSWORD= \
+    -e LOG_CHANNEL=stderr -e VIEW_COMPILED_PATH=/tmp \
+    -e CACHE_DRIVER=array -e CACHE_STORE=array -e SESSION_DRIVER=array \
+    -e QUEUE_CONNECTION=sync -e MAIL_MAILER=array -e TELESCOPE_ENABLED=false \
+    "$php_image" -S 127.0.0.1:18770 -t public public/index.php >/dev/null
+  local expected_network="container:$(docker inspect "$container" --format '{{.Id}}')"
+  local actual_network
+  actual_network=$(docker inspect "$http_name" --format '{{.HostConfig.NetworkMode}}')
+  [[ "$actual_network" == "$expected_network" ]] || {
+    docker rm -f "$http_name" >/dev/null 2>&1 || true
+    echo "RC1_${phase}_HTTP_ISOLATION=NO_GO"
+    return 2
+  }
+  local status="" success=0
+  for i in $(seq 1 20); do
+    if status=$(docker exec "$http_name" curl --silent --output /dev/null --write-out '%{http_code}' --max-time 3 "http://127.0.0.1:18770/health" 2>/dev/null); then
+      [[ "$status" == 200 ]] && success=1
+      break
+    fi
+    sleep 1
+  done
+  docker rm -f "$http_name" >/dev/null 2>&1 || true
+  echo "RC1_${phase}_HTTP_HEALTH_STATUS=${status:-UNRESPONSIVE}"
+  [[ "$success" == 1 ]] || { echo "RC1_${phase}_HTTP_HEALTH=NO_GO"; return 2; }
+  echo "RC1_${phase}_HTTP_HEALTH=PASS"
+}
+http_health_probe "$api" fleetbase L12
 echo "RC1_REAL_L12_UPGRADE=PASS_ISOLATED"
 
 # This rollback rehearsal destroys ONLY upgraded schemas in the disposable
@@ -336,6 +380,7 @@ if ! legacy_cli artisan route:list --json >/dev/null 2>"$diagnostics"; then
   exit 2
 fi
 echo "RC1_S7_LARAVEL10_ROUTE_BOOTSTRAP=PASS"
+http_health_probe "$legacy/repo/api" fleetbase L10
 echo "RC1_S7_ISOLATED_DB_AND_LARAVEL10_CLI_ROLLBACK=PASS"
 echo "RC1_S7_FULL_HTTP_WORKER_PRODUCTION_ROLLBACK=NOT_TESTED"
 echo "RC1_PRODUCTION=NO_GO"
