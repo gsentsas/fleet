@@ -108,6 +108,37 @@ print(hits[0])
     fi
     log_count=$(docker logs --tail 100 "$container" 2>&1 | grep -ciE 'ready for connections|shutdown|abort|fatal error|signal [0-9]+' || true)
     echo "RC1_RESTORE_MYSQL_LIFECYCLE_LOG_MATCHES=$log_count"
+    echo "RC1_RESTORE_MYSQL_LOG_ERROR_IDS=$(docker logs --tail 200 "$container" 2>&1 | grep -Eo 'MY-[0-9]{6}' | sort -u | tr '\\n' ',' || true)"
+    for pattern in 'got signal' 'Failed to open' 'Read-only file system' 'Permission denied' 'Aborting' 'Cannot allocate' 'No space left'; do
+      if docker logs --tail 200 "$container" 2>&1 | grep -qi "$pattern"; then
+        echo "RC1_RESTORE_MYSQL_LOG_SIGNAL_$(echo "$pattern" | tr '[:lower:] ' '[:upper:]_' | tr -cd 'A-Z0-9_')=YES"
+      fi
+    done
+    echo "RC1_RESTORE_MYSQL_PROCESS_COUNT=$(docker exec "$container" sh -c "ps -e -o comm 2>/dev/null | grep -c '^mysqld
+    echo "RC1_RESTORE_CONTAINER_STATE=$(docker inspect "$container" --format 'running={{.State.Running}} oom={{.State.OOMKilled}} exit={{.State.ExitCode}}' 2>/dev/null || echo missing)"
+    echo "RC1_RESTORE_TMPFS_USAGE=$(docker exec "$container" df -k /var/lib/mysql 2>/dev/null | awk 'NR==2 {print "size_kib="$2",used_kib="$3",free_kib="$4}' || echo unavailable)"
+    for pattern in 'No space left on device' 'Disk is full' 'Out of memory' 'Operating system error number 28' 'InnoDB.*error'; do
+      if docker logs --tail 200 "$container" 2>&1 | grep -qiE "$pattern"; then
+        echo "RC1_RESTORE_MYSQL_LOG_CATEGORY_$(echo "$pattern" | tr '[:lower:] ' '[:upper:]_' | tr -cd 'A-Z0-9_')=PRESENT"
+      fi
+    done
+    docker stats --no-stream --format 'RC1_RESTORE_MEMORY_AT_FAILURE={{.MemUsage}}' "$container" 2>/dev/null || true
+    rm -f "$error_log"
+    exit 2
+  fi
+  rm -f "$error_log"
+  tables=$(docker exec "$container" mysql --protocol=socket -uroot -N -B -e \
+    "SELECT COUNT(*) FROM information_schema.tables WHERE TABLE_SCHEMA='$name' AND TABLE_TYPE='BASE TABLE';")
+  [[ "$tables" == "$expected" ]] || { echo "RC1_RESTORE_TABLE_COUNT_$name=NO_GO"; exit 2; }
+  echo "RC1_RESTORE_IMPORT_$name=PASS"
+  echo "RC1_RESTORE_TABLE_COUNT_$name=$tables"
+done
+
+echo "RC1_REAL_THREE_DB_IMPORT=PASS_ISOLATED"
+echo "RC1_LARAVEL12_REAL_DATA_UPGRADE=NOT_RUN"
+echo "RC1_FULL_APP_ROLLBACK=NOT_RUN"
+echo "RC1_PRODUCTION=NO_GO"
+ || true" 2>/dev/null || echo UNAVAILABLE)"
     echo "RC1_RESTORE_CONTAINER_STATE=$(docker inspect "$container" --format 'running={{.State.Running}} oom={{.State.OOMKilled}} exit={{.State.ExitCode}}' 2>/dev/null || echo missing)"
     echo "RC1_RESTORE_TMPFS_USAGE=$(docker exec "$container" df -k /var/lib/mysql 2>/dev/null | awk 'NR==2 {print "size_kib="$2",used_kib="$3",free_kib="$4}' || echo unavailable)"
     for pattern in 'No space left on device' 'Disk is full' 'Out of memory' 'Operating system error number 28' 'InnoDB.*error'; do
