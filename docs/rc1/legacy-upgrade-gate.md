@@ -366,3 +366,18 @@ The fixture now includes `HasSessionAttributes` and **stubs only `applyDirective
 - Earlier candidate runs without the full fixture produced test-harness errors (route/controller resolver, missing directives relation, missing `HasSessionAttributes::isSessionAgnosticColumn`). These were **not** marked as PASS; the fixture is now corrected and fully rerun. No production changes; test artifacts cleaned up.
 
 **Strict scope:** This is an ORM/service regression of the candidate only. It does not validate actual API-minted credentials, authorization directives, real HTTP response codes or company-switch logic; those remain `NOT_TESTED`. The candidate remains **unmerged and unpinned**; no change to RC1 Composer dependency locks. Production remains **NO-GO**.
+
+
+## Auth::setSession synthetic identity provenance and absent-company admission — 2026-11-10
+
+The committed `scripts/rc1-api-auth-session-provenance-lab.sh` (`82676d64`) was executed under both pinned Laravel12 and historical Laravel10 code in PHP 8.2 disposable, `--network none`, read-only app mounts, a 384 MiB cap and an array session with no database access. `bash -n=PASS` and full exit code **0**.
+
+The lab calls the genuine `Fleetbase\\Support\\Auth::setSession` with simple synthetic user-like objects (NOT real API credentials or actual Eloquent users) to isolate the session behavior:
+- Identity A with company A produces `session('user')=A` and `session('company')=A`; a forged `company_uuid=B` query parameter is not used to overwrite that session.
+- Initializing identity B replaces both the session user and company with B.
+- **Both runtimes:** `RC1_SESSION_L12=PASS_SYNTHETIC_IDENTITY`, `RC1_SESSION_L10=PASS_SYNTHETIC_IDENTITY`.
+- **Important finding:** calling `Auth::setSession` with a synthetic identity whose `company_uuid=null` still **returns true** and leaves the session company null: `RC1_MISSING_COMPANY_SESSION_L12=ACCEPTED_SECURITY_REVIEW_REQUIRED` and identical result under Laravel10.
+
+**Boundary:** The public API middleware `AuthenticateOnceWithBasicAuth` additionally resolves a bearer token to `ApiCredential` or Sanctum token, checks ownership/expiry and initializes session through `Auth::setSession`. Sanctum also has a separate UUID company check. **This diagnostic does not prove that a real bearer credential can authenticate without a company**, or that API request parameters can bypass middleware. Actual signed credentials, two identities, authorization directives, internal API vs public API, missing-company guard and cross-tenant authenticated HTTP 401/403/404 remain **NOT TESTED**. A candidate patch for five model methods exists on a separate Core API branch and is not installed in RC1 or production.
+
+**Decision:** `SESSION_PROVENANCE_SYNTHETIC=PASS`; `MISSING_COMPANY_ADMISSION=SECURITY_REVIEW_REQUIRED`; `AUTHENTICATED_HTTP_TENANCY=NOT_RUN`; `PRODUCTION=NO_GO`.
