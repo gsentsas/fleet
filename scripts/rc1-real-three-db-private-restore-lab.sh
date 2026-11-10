@@ -99,6 +99,15 @@ print(hits[0])
     mysql_code=$(grep -m 1 -Eo 'ERROR [0-9]+' "$error_log" || true)
     echo "RC1_RESTORE_IMPORT_$name=NO_GO"
     echo "RC1_RESTORE_MYSQL_ERROR_CODE=${mysql_code:-UNCLASSIFIED}"
+    error_line=$(grep -m 1 -Eo 'at line [0-9]+' "$error_log" || true)
+    echo "RC1_RESTORE_MYSQL_ERROR_LINE=${error_line:-NOT_REPORTED}"
+    if docker exec "$container" mysqladmin --protocol=socket -uroot ping >/dev/null 2>&1; then
+      echo "RC1_RESTORE_MYSQL_AFTER_ERROR=RESPONDING"
+    else
+      echo "RC1_RESTORE_MYSQL_AFTER_ERROR=NOT_RESPONDING"
+    fi
+    log_count=$(docker logs --tail 100 "$container" 2>&1 | grep -ciE 'ready for connections|shutdown|abort|fatal error|signal [0-9]+' || true)
+    echo "RC1_RESTORE_MYSQL_LIFECYCLE_LOG_MATCHES=$log_count"
     echo "RC1_RESTORE_CONTAINER_STATE=$(docker inspect "$container" --format 'running={{.State.Running}} oom={{.State.OOMKilled}} exit={{.State.ExitCode}}' 2>/dev/null || echo missing)"
     docker stats --no-stream --format 'RC1_RESTORE_MEMORY_AT_FAILURE={{.MemUsage}}' "$container" 2>/dev/null || true
     rm -f "$error_log"
