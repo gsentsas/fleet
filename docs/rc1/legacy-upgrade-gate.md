@@ -188,3 +188,19 @@ A new safety invariant computes SHA-256 of **exact `COUNT(*)` results from every
 - **Full script exit 0**, ephemeral container removed, production API and MySQL remain healthy.
 
 **Scope clarification:** exact row-count equality is stronger than table counts but cannot detect altered values when the number of rows stays constant. Neither full per-row business-value diff nor actual HTTP/queue/socket/worker rollback was performed. Production remains NO-GO pending full-stack private staging validation and authorized change gate.
+
+
+## Real-data values preserved after Laravel12 (all historical tables) — 2026-11-10
+
+Committed test `scripts/rc1-real-laravel10-rollback-rehearsal.sh` at commit `063589c7` was rerun against three actual Restic-restored databases in a networkless disposable MySQL container. Before migration, it hashed **data-only MySQL dump streams with primary-key ordering** from all historical tables while explicitly omitting the `migrations` registry and the RC1-only `telematic_webhook_receipts` table. The same hashes were recomputed after Laravel12 migration. No business records, table names or hashes were emitted to public logs.
+
+- `RC1_S4_HISTORICAL_ROW_VALUES_fleetbase=PASS`.
+- `RC1_S4_HISTORICAL_ROW_VALUES_fleetbase_sandbox=PASS`.
+- `RC1_S4_HISTORICAL_ROW_VALUES_fleetbase_storefront=PASS`.
+- `RC1_S4_THREE_DB_HISTORICAL_ROW_VALUES=PASS`.
+- Historical table `COUNT(*)` invariants also PASS for all three databases.
+- Laravel12 upgrades of real restored data PASS (tables **153/139/33**, migrations **395/305**).
+- Follow-on recovery restores three original SQL database images, all **3/3 full canonical SQL content fingerprints equal**, original tables **152/138/33**, migration registries **394/304**, pinned Laravel10 CLI migration status and route bootstrap both PASS.
+- Full script: **exit 0**, no remaining temporary lab containers, production API/MySQL healthy.
+
+**Limitations:** Data-only dump fingerprints capture business row values as serialized by pinned MySQL with primary-key ordering. They do not prove all integration/HTTP/socket/worker flows under real traffic; no production upgrade occurred and PR #6 stays DRAFT. The full-stack rollback gate remains NO-GO.
