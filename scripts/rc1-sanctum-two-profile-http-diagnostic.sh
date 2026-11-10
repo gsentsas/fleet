@@ -110,6 +110,11 @@ for profile in no_role admin; do
     *) label=DETAIL;;
   esac
   echo "RC1_SANCTUM_${profile}_${label}_HTTP=$status_code"
+  if [[ "$status_code" == 500 ]]; then
+    # Only exception classes; never logs, error messages, tokens or PII.
+    exception_classes=$(docker logs "$web" 2>&1 | grep -Eo '[A-Za-z_\\\\]+(Exception|Error)' | sort -u | head -n 10 | tr '\n' ',' || true)
+    echo "RC1_SANCTUM_${profile}_${label}_EXCEPTION_TYPES=$exception_classes"
+  fi
   [[ "$status_code" =~ ^[0-9]{3}$ ]] || { echo RC1_SANCTUM_HTTP=NO_GO_TRANSPORT; exit 2; }
  done
 done
