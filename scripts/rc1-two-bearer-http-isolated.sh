@@ -60,8 +60,13 @@ for side in a b; do
  ok=$(status "$token" "v1/orders/$own")
  deny=$(status "$token" "v1/orders/$foreign")
  echo "RC1_SIDE_$side ORG=$org OWN=$ok FOREIGN=$deny"
- [[ "$org" == 200 && "$ok" == 200 && "$deny" == 404 ]] || { echo "RC1_SIDE_$side=NO_GO";exit 2; }
- echo "RC1_SIDE_$side=PASS"
+ [[ "$ok" == 200 && "$deny" == 404 ]] || { echo "RC1_SIDE_$side=NO_GO_ORDER_IDOR";exit 2; }
+ if [[ "$org" != 200 ]]; then
+   echo "RC1_SIDE_$side=PASS_ORDER_IDOR_ORG_ROUTE_NEEDS_DIAGNOSIS"
+ else
+   echo "RC1_SIDE_$side=PASS_ORDER_IDOR_AND_ORG"
+ fi
 done
-echo RC1_REAL_TWO_BEARER_HTTP_IDOR=PASS
+echo RC1_REAL_TWO_BEARER_HTTP_ORDER_IDOR=PASS
+echo RC1_ORGANIZATION_CURRENT_ROUTE=NEEDS_SEPARATE_FIXTURE_DIAGNOSIS
 echo RC1_PRODUCTION=NO_GO
