@@ -60,6 +60,12 @@ for side in a b; do
  ok=$(status "$token" "v1/orders/$own")
  deny=$(status "$token" "v1/orders/$foreign")
  echo "RC1_SIDE_$side ORG=$org OWN=$ok FOREIGN=$deny"
+ if [[ "$deny" == 500 || "$org" == 500 ]]; then
+   # Only exception *types* and PHP source path names, never messages,
+   # tokens, response bodies, SQL values, or restored business records.
+   classes=$(docker logs "$web" 2>&1 | grep -Eo '[A-Za-z_\\\\]+(Exception|Error)' | sort -u | head -n 8 | tr '\n' ',' || true)
+   echo "RC1_SIDE_$side"_ERROR_TYPES="$classes"
+ fi
  [[ "$ok" == 200 && "$deny" == 404 ]] || { echo "RC1_SIDE_$side=NO_GO_ORDER_IDOR";exit 2; }
  if [[ "$org" != 200 ]]; then
    echo "RC1_SIDE_$side=PASS_ORDER_IDOR_ORG_ROUTE_NEEDS_DIAGNOSIS"
