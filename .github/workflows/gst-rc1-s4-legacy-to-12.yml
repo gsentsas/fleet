@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/gst-rc1-s4-legacy-to-12.yml'
+      - 'scripts/rc1-schema-fingerprint.py'
   workflow_dispatch:
 
 permissions:
@@ -142,6 +143,8 @@ jobs:
             db="gst_rc1_s4_upgrade${suffix}"
             mysqldump -h 127.0.0.1 -uroot --single-transaction --quick --no-tablespaces --routines --events --triggers "$db" > "$RUNNER_TEMP/s7-old${suffix}.sql"
             test -s "$RUNNER_TEMP/s7-old${suffix}.sql"
+            python3 rc1/scripts/rc1-schema-fingerprint.py "$db" > "$RUNNER_TEMP/s7-old${suffix}.sha256"
+            test "$(wc -c < "$RUNNER_TEMP/s7-old${suffix}.sha256")" -eq 65
             echo "S7_PRE_UPGRADE_SNAPSHOT=PASS:${db}"
           done
 
@@ -207,6 +210,12 @@ jobs:
             else
               test "$restored" -eq 33
             fi
+            python3 rc1/scripts/rc1-schema-fingerprint.py "$db" > "$RUNNER_TEMP/s7-recovered${suffix}.sha256"
+            if ! cmp -s "$RUNNER_TEMP/s7-old${suffix}.sha256" "$RUNNER_TEMP/s7-recovered${suffix}.sha256"; then
+              echo "STOP=S7_RELATIONAL_SCHEMA_FINGERPRINT_MISMATCH:${db}"
+              exit 2
+            fi
+            echo "S7_RELATIONAL_SCHEMA_FINGERPRINT=PASS:${db}"
             echo "S7_RECOVERED_HISTORICAL_TABLES=PASS:${db}:${restored}"
           done
           mysql -h 127.0.0.1 -uroot -N -B gst_rc1_s7_recovered -e "SELECT COUNT(*) FROM migrations" | grep -qx 394
