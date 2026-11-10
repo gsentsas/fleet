@@ -19,8 +19,12 @@ case "$(uname -s)" in
   *) echo "STOP=UNSUPPORTED_HOST"; exit 2 ;;
 esac
 
-disk_kib=$(df -Pk / | awk 'NR==2 {print $4}')
-disk_pct=$(df -Pk / | awk 'NR==2 {gsub(/%/,"",$5); print $5}')
+disk_path="/"
+if [ "$(uname -s)" = Darwin ]; then
+  disk_path="/System/Volumes/Data"
+fi
+disk_kib=$(df -Pk "$disk_path" | awk 'NR==2 {print $4}')
+disk_pct=$(df -Pk "$disk_path" | awk 'NR==2 {gsub(/%/,"",$5); print $5}')
 require "RC1_FREE_DISK_AT_LEAST_25_GIB" "$([ "$disk_kib" -ge 26214400 ] && echo 1 || echo 0)" "free_kib=$disk_kib"
 require "RC1_DISK_USAGE_AT_MOST_85_PERCENT" "$([ "$disk_pct" -le 85 ] && echo 1 || echo 0)" "used_pct=$disk_pct"
 
