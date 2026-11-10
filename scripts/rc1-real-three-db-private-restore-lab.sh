@@ -109,6 +109,12 @@ print(hits[0])
     log_count=$(docker logs --tail 100 "$container" 2>&1 | grep -ciE 'ready for connections|shutdown|abort|fatal error|signal [0-9]+' || true)
     echo "RC1_RESTORE_MYSQL_LIFECYCLE_LOG_MATCHES=$log_count"
     echo "RC1_RESTORE_CONTAINER_STATE=$(docker inspect "$container" --format 'running={{.State.Running}} oom={{.State.OOMKilled}} exit={{.State.ExitCode}}' 2>/dev/null || echo missing)"
+    echo "RC1_RESTORE_TMPFS_USAGE=$(docker exec "$container" df -k /var/lib/mysql 2>/dev/null | awk 'NR==2 {print "size_kib="$2",used_kib="$3",free_kib="$4}' || echo unavailable)"
+    for pattern in 'No space left on device' 'Disk is full' 'Out of memory' 'Operating system error number 28' 'InnoDB.*error'; do
+      if docker logs --tail 200 "$container" 2>&1 | grep -qiE "$pattern"; then
+        echo "RC1_RESTORE_MYSQL_LOG_CATEGORY_$(echo "$pattern" | tr '[:lower:] ' '[:upper:]_' | tr -cd 'A-Z0-9_')=PRESENT"
+      fi
+    done
     docker stats --no-stream --format 'RC1_RESTORE_MEMORY_AT_FAILURE={{.MemUsage}}' "$container" 2>/dev/null || true
     rm -f "$error_log"
     exit 2
