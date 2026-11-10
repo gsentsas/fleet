@@ -127,3 +127,19 @@ The committed `scripts/rc1-real-three-db-private-restore-lab.sh` was executed ag
 **Final execution:** `bash -n=PASS`, `RC1_RESTORE_ISOLATION=PASS`, `RC1_RESTORE_MYSQL_FINAL_START=PASS`, `RC1_REAL_THREE_DB_IMPORT=PASS_ISOLATED`, exit code **0**, automatic lab cleanup attempted and verified no leftover container.
 
 **Remaining production gates:** Laravel 12 migration against this restored existing-data set, post-migration row counts/business invariants and full application+DB rollback with the pinned Laravel 10 runtime are **NOT RUN**. The one-shot MySQL restore succeeded, but a full private staging environment remains unqualified; no merge, tag, public CI with customer data, or live deployment. `PRODUCTION=NO_GO`.
+
+
+## Three real restored SQL schemas: migration registries and relational integrity metadata — 2026-11-10
+
+The latest committed `scripts/rc1-real-three-db-private-restore-lab.sh` was rerun against the pinned daily Restic backup, inside a single isolated socket-only MySQL 8 container (`--network none`, no published ports, read-only root filesystem, 1536 MiB memory limit, 768 MiB ephemeral MySQL tmpfs). **Result: `RC1_REAL_THREE_DB_IMPORT=PASS_ISOLATED`, exit code 0; disposable container removed, production Fleetbase API/DB still healthy.**
+
+| Real restored database | Base tables | Tables with indexes | Foreign-key constraints | Migration registry records | Status |
+|---|---:|---:|---:|---:|---|
+| `fleetbase` | 152 | 152 | 329 | 394 | PASS |
+| `fleetbase_sandbox` | 138 | 138 | 311 | 304 | PASS |
+| `fleetbase_storefront` | 33 | 33 | 81 | No migrations table (expected) | PASS |
+| **Total** | **323** | **323** | **721** | **698 in two registries** | **PASS** |
+
+No tables were printed and no user data exported or logged. Registry record counts exactly match the previously audited production baseline. The first trial of this additional metadata assertion failed because of incorrectly escaped `printf` newlines; commit `f416e1f1` corrected only the test harness, then the complete rerun succeeded.
+
+**Important boundary:** this is a successful **MySQL restoration plus relational-metadata consistency proof**, not Laravel 12 running on the restored databases. No RC1 application runtime, migration or full application+data rollback was executed. `PRODUCTION=NO_GO`.
