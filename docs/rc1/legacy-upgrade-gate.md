@@ -396,3 +396,20 @@ The newly committed reproducible `scripts/rc1-api-auth-session-candidate-lab.sh`
 - Script `bash -n=PASS`, Core API candidate `php -l=PASS`, full run **exit 0**. Temporary source file deleted. No real accounts/credentials, external network or production database accessed.
 
 **Strict limitations:** The test invokes the real Auth session method but **not the complete bearer-token middleware, an Eloquent User/ApiCredential authenticated through the database, or actual HTTP**. It therefore does not establish that a particular production bearer token can authenticate with a missing/invalid company, nor that the candidate is safe under actual multi-tenant traffic. A real two-company authenticated HTTP test with full authorization directives, tenant IDOR, API key and Sanctum flows and dedicated full-stack staging rollback remain **NOT RUN**. `PRODUCTION=NO_GO`, candidate NOT MERGED, PR #6 DRAFT.
+
+
+## First real two-bearer HTTP integration on restored SQL — PARTIAL PASS / NO-GO, 2026-11-10
+
+**New executable:** `scripts/rc1-two-bearer-http-isolated.sh`, latest guard change `7c8ff471`. This is the first *actual HTTP* identity and order-access run: pinned Laravel12 API under `php -S` sharing loopback with an **ephemeral MySQL 8 container** (`--network none`, no host ports, readonly application source, RAM caps, tmpfs MySQL data). Restic backup `gstfleet-daily` was restored locally to the ephemeral database (152 tables verified). Two synthetic company/user/API credential/order pairs were inserted **only into the temporary restored DB**, with no real identifiers or tokens printed. The two candidate Core API patches (`Auth.php` and `HasApiModelBehavior.php`) were mounted readonly over the installed vendor files. The initial fixture run failed on circular users/companies foreign keys; insertion was fixed within the disposable database script by temporary FK checks disabled during synthetic inserts and re-enabled before HTTP calls.
+
+**Observed true HTTP responses, company A:**
+- `GET /health` → **200**.
+- Anonymous `GET /v1/orders/rc1-test-order-a` → **401**.
+- Authenticated bearer key A `GET /v1/orders/rc1-test-order-a` → **200**.
+- Authenticated bearer key A `GET /v1/orders/rc1-test-order-b` → **404**.
+- Bearer A `GET /v1/organizations/current` → **500**, a **separate unresolved org-resource / fixture dependency anomaly**.
+- **The script deliberately returned NO-GO (exit 2)** because the org route was required and was 500; company B was **not yet probed**. Thus **`AUTHENTICATED_HTTP_COMPANY_A_ORDER_SCOPE=PASS_OBSERVED`, `AUTHENTICATED_HTTP_TWO_WAY_IDOR=NOT_COMPLETED`**.
+
+The script was revised to assess order IDOR independently from the organization endpoint and to test both A and B (commit `630e05f8`). The next run aborted **before any container started** because the available host memory was around **3.6 GiB**, below the existing 5 GiB safety gate (no swap, production running on the same host). The latest script now emits **`RC1_REAL_TWO_BEARER_HTTP=NO_GO_MEMORY_BELOW_5_GIB`** at that guard (commit `7c8ff471`). **Do not lower the 5 GiB guard or disrupt production to force these tests**. Run the complete two-way test on a dedicated, sufficiently provisioned staging host when available.
+
+**Cleanup and security:** No production migrations, database writes, exposed ports, merged Core API patches, or production restarts. Ephemeral MySQL and HTTP containers and temporary candidate files were removed. Existing production services remain healthy. This is a significant A→B HTTP test result but **not** a complete approval gate. **PR #6 DRAFT; PRODUCTION NO-GO.**
