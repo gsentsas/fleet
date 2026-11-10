@@ -5,7 +5,7 @@ umask 077
 export RESTIC_REPOSITORY=/root/gstfleet-secure-repository RESTIC_PASSWORD_FILE=/root/gstfleet-secure-repository.password
 [[ -f /dev/shm/gst-rc1-core-fail-closed-candidate.php && -f /dev/shm/gst-rc1-auth-session-candidate.php ]] || exit 2
 [[ "$(docker inspect gstfleet-database-1 --format '{{.State.Running}} {{.State.Health.Status}}')" == 'true healthy' ]] || exit 2
-(( $(awk '/MemAvailable:/ {print $2}' /proc/meminfo) > 5242880 )) || exit 2
+(( $(awk '/MemAvailable:/ {print $2}' /proc/meminfo) > 5242880 )) || { echo RC1_REAL_TWO_BEARER_HTTP=NO_GO_MEMORY_BELOW_5_GIB; exit 2; }
 [[ "$(docker image inspect mysql:8.0-oracle --format '{{.Id}}')" == sha256:6cd09145362dfe6831b14545de3d5fd6cc75c37cfd6ef8561429c1fc73518b39 ]] || exit 2
 [[ "$(docker image inspect fleetbase/fleetbase-api:v0.7.75 --format '{{.Id}}')" == sha256:413e497080156b692e089106c37555a1e33edabda1bb0b6f09c104b7a2c6171a ]] || exit 2
 name="gst-rc1-http-auth-db-$$"
