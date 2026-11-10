@@ -92,7 +92,15 @@ jobs:
         run: |
           set -euo pipefail
           export APP_KEY="$(php -r 'echo "base64:".base64_encode(random_bytes(32));')"
-          mysql -h 127.0.0.1 -uroot -e 'CREATE DATABASE gst_rc1_s4_synthetic CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci'
+          # Core, sandbox and Storefront use separate databases even though their
+          # migration registrations are tracked by Laravel's primary connection.
+          # All three names are prefixed for this disposable GitHub runner only.
+          mysql -h 127.0.0.1 -uroot <<'SQL'
+          CREATE DATABASE gst_rc1_s4_synthetic CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+          CREATE DATABASE gst_rc1_s4_synthetic_sandbox CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+          CREATE DATABASE gst_rc1_s4_synthetic_storefront CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+          SQL
+          echo "S4_THREE_SYNTHETIC_DATABASES=PASS"
           php artisan migrate --force --no-interaction --no-ansi > "$RUNNER_TEMP/s4-fresh.log" 2>&1 || {
             tail -n 55 "$RUNNER_TEMP/s4-fresh.log"
             exit 2
