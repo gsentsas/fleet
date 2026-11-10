@@ -105,8 +105,14 @@ for side in a b; do
  own_put=$(docker exec "$web" curl -s -o /dev/null -w '%{http_code}' --max-time 20 --request PUT -H 'Accept: application/json' -H 'Content-Type: application/json' -H "Authorization: Bearer $token" --data '{"notes":"rc1-own-tenant-updated"}' "http://127.0.0.1:18770/v1/orders/$own" || echo ERROR)
  echo "RC1_SIDE_$side OWN_PUT=$own_put"
  actual_notes=$(docker exec "$name" mysql -uroot --protocol=socket -N -B -e "SELECT COALESCE(notes,'<NULL>') FROM fleetbase.orders WHERE public_id='$own' LIMIT 1;")
- foreign_original=$(docker exec "$name" mysql -uroot --protocol=socket -N -B -e "SELECT COUNT(*) FROM fleetbase.orders WHERE public_id='$foreign' AND deleted_at IS NULL AND notes IS NULL AND status='created';")
- [[ "$own_put" == 200 && "$actual_notes" == "rc1-own-tenant-updated" && "$foreign_original" == 1 ]] || {
+ # A was legitimately updated earlier when B runs; its expected value
+ # is no longer NULL. Assert that no unintended changes occurred.
+ if [[ "$side" == a ]]; then
+   foreign_unchanged=$(docker exec "$name" mysql -uroot --protocol=socket -N -B -e "SELECT COUNT(*) FROM fleetbase.orders WHERE public_id='$foreign' AND deleted_at IS NULL AND notes IS NULL AND status='created';")
+ else
+   foreign_unchanged=$(docker exec "$name" mysql -uroot --protocol=socket -N -B -e "SELECT COUNT(*) FROM fleetbase.orders WHERE public_id='$foreign' AND deleted_at IS NULL AND notes='rc1-own-tenant-updated' AND status='created';")
+ fi
+ [[ "$own_put" == 200 && "$actual_notes" == "rc1-own-tenant-updated" && "$foreign_unchanged" == 1 ]] || {
    echo "RC1_SIDE_$side=NO_GO_OWN_PUT_OR_SQL_ASSERTION";exit 2;
  }
  echo "RC1_SIDE_$side=PASS_OWN_PUT_DB_EFFECT"
