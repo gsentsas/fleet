@@ -447,3 +447,18 @@ For both bearer A and bearer B:
 Anonymous GET order 401, health 200. Markers `RC1_REAL_TWO_BEARER_HTTP_ORDER_IDOR=PASS` and `RC1_REAL_TWO_BEARER_HTTP_FOREIGN_PUT_DELETE=PASS`; test `bash -n=PASS` and final **exit 0**. Only HTTP codes and synthetic invariants are logged; no customer rows, tokens or response bodies printed. All ephemeral containers and temporary candidate files cleaned.
 
 **Scope:** This is real two-company, bearer API key HTTP cross-tenant **read, PUT, DELETE denial** with a preserved database, on the **unmerged candidate patch**, not on the deployed code. Positive own-company PUT/DELETE, role/permission matrices, Sanctum flows, absent-company HTTP route tests, other model types, complete multiservice staging and rollback remain NOT TESTED. **Do not merge/tag/deploy** on this result alone; PR #6 DRAFT, production NO-GO.
+
+
+## Authenticated own-order PUT/DELETE positive-path rehearsal — PARTIAL PASS, 2026-11-10
+
+**Source committed:** `scripts/rc1-two-bearer-http-own-write-lab.sh`, initial commit `60c0b5a5`, sequential state corrections `63ac2e60` (own PUT) and `831e2c8f98400979a6eeb00bd2c0a150dd6b8f36` (own DELETE). The script reuses the validated fully isolated, real HTTP two-bearer lab: pinned Laravel12 API, the **unmerged** Core API candidate readonly overrides, Restic-restored ephemeral 152-table MySQL, throwaway Redis, two synthetic companies/users/keys/orders, `--network none`, no published ports, memory limits and temporary-only storage.
+
+**Actual HTTP/SQL results from the first two isolated executions:**
+- Authenticated foreign-company GET/PUT/DELETE remains **404** in both directions, with no unintended database changes (**PASS**, previously separately verified).
+- Company A own-order HTTP PUT **200**, SQL `notes` updated to the synthetic test value (**PASS**).
+- Company B own-order HTTP PUT **200**, SQL `notes` updated to the same synthetic test value (**PASS**); the first test run incorrectly expected company A's note to be null after A had legitimately changed it. Corrected the sequential fixture assertion, then retested to PASS.
+- Company A own-order HTTP DELETE **200**, corresponding row soft-deleted in disposable SQL (**PASS**).
+- Company B own-order HTTP DELETE **200** was observed, but the script **did not reach a successful final SQL assertion** because it incorrectly expected A's row to be still active after the preceding legitimate A deletion. The test harness was corrected and now asserts both expected prior states plus two final soft-deleted rows. **Do not mark B's own DELETE SQL as PASS yet.**
+- The corrected final script `bash -n=PASS`; the next run was rejected by the host RAM preflight: **`RC1_REAL_TWO_BEARER_HTTP=NO_GO_MEMORY_BELOW_5_GIB`**, exit 2 **before any test container started**. Host memory available at last check ~4.2 GiB; no swap. Production Fleetbase services remain healthy. Do not lower this guard or stop any production service.
+
+**Decision:** `AUTHENTICATED_OWN_PUT_A_B=PASS`, `AUTHENTICATED_OWN_DELETE_A=PASS`, `AUTHENTICATED_OWN_DELETE_B_HTTP_200_OBSERVED_SQL_PROOF=PENDING`, `CORRECTED_FULL_OWN_WRITE_GATE=NOT_COMPLETED_DUE_MEMORY`; **PR #6 DRAFT, candidate NOT INTEGRATED, PRODUCTION NO-GO**. Next run must be on sufficiently provisioned staging or after free host RAM exceeds the existing safe threshold, without production disruption.
