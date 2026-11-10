@@ -69,6 +69,20 @@ $model=new Rc1TenantMutationModel();
 mustDeny(fn()=>$model->getById('order-b',null,$request),'GET');
 mustDeny(fn()=>$model->updateRecordFromRequest($request,'order-b'),'UPDATE');
 requirePass(Rc1TenantMutationModel::where('company_uuid','rc1-b')->value('reference')==='B','FOREIGN_VALUE_UNCHANGED');
+// Positive read from the exact real API model trait (authorization directives
+// are a separate concern and are stubbed only in this synthetic fixture).
+$own=$model->getById('order-a',null,$request);
+requirePass($own instanceof Rc1TenantMutationModel && $own->public_id==='order-a','OWN_GET');
+echo "RC1_OWN_TENANT_READ=PASS\n";
+// Change only the own order; assert that company B remains untouched.
+$ownRequest=Illuminate\Http\Request::create('/v1/orders/order-a','PATCH',['reference'=>'A-updated']);
+$ownRequest->setRouteResolver(fn()=>$route);
+$ownRequest->setLaravelSession($app->make('session.store'));
+$updated=$model->updateRecordFromRequest($ownRequest,'order-a',null,null,['return_object'=>true]);
+requirePass($updated instanceof Rc1TenantMutationModel,'OWN_UPDATE_RETURN');
+requirePass(Rc1TenantMutationModel::where('company_uuid','rc1-a')->value('reference')==='A-updated','OWN_UPDATE_VALUE');
+requirePass(Rc1TenantMutationModel::where('company_uuid','rc1-b')->value('reference')==='B','FOREIGN_VALUE_STILL_UNCHANGED');
+echo "RC1_OWN_TENANT_UPDATE=PASS\n";
 
 mustDeny(fn()=>$model->remove('order-b'),'REMOVE');
 mustDeny(fn()=>$model->bulkRemove(['order-b']),'BULK');
@@ -107,7 +121,9 @@ for version in L12 L10; do
     -e LOG_CHANNEL=stderr -e VIEW_COMPILED_PATH=/tmp \
     fleetbase/fleetbase-api:v0.7.75 /tmp/rc1-mutations.php >"$log" 2>&1; then
     if grep -qx 'RC1_CROSS_TENANT_MUTATION_DENIAL=PASS' "$log" &&
-       grep -qx 'RC1_MISSING_COMPANY_ALL_FIVE_PATHS_FAIL_CLOSED=PASS' "$log"; then
+       grep -qx 'RC1_MISSING_COMPANY_ALL_FIVE_PATHS_FAIL_CLOSED=PASS' "$log" &&
+       grep -qx 'RC1_OWN_TENANT_READ=PASS' "$log" &&
+       grep -qx 'RC1_OWN_TENANT_UPDATE=PASS' "$log"; then
       echo "RC1_$version"_MUTATION_AND_FAIL_CLOSED=PASS
     else
       echo "RC1_$version"_MUTATION_AND_FAIL_CLOSED=NO_GO_MISSING_MARKERS
