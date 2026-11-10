@@ -138,6 +138,22 @@ jobs:
       - name: Snapshot the three historical synthetic databases before upgrade
         run: |
           set -euo pipefail
+          # Seed deterministic, non-customer fixture rows in each legacy schema.
+          # Validate their preservation after upgrade AND after SQL recovery.
+          # This intentionally adds one synthetic table to each schema.
+          for suffix in '' _sandbox _storefront; do
+            db="gst_rc1_s4_upgrade${suffix}"
+            mysql -h 127.0.0.1 -uroot "$db" <<'SQL'
+          CREATE TABLE s4_synthetic_integrity_fixture (
+            id INT NOT NULL PRIMARY KEY,
+            marker VARCHAR(64) NOT NULL
+          );
+          INSERT INTO s4_synthetic_integrity_fixture (id,marker)
+          VALUES (1,SHA2('gst-rc1-disposable-fixture',256));
+          SQL
+            test "$(mysql -h 127.0.0.1 -uroot -N -B "$db" -e "SELECT COUNT(*) FROM s4_synthetic_integrity_fixture WHERE id=1 AND marker=SHA2('gst-rc1-disposable-fixture',256)")" = 1
+            echo "S4_LEGACY_SYNTHETIC_FIXTURE_SEEDED=PASS:${db}"
+          done
           # The dump files contain only CI-created schema, no production records.
           for suffix in '' _sandbox _storefront; do
             db="gst_rc1_s4_upgrade${suffix}"
@@ -184,6 +200,11 @@ jobs:
           php artisan migrate --force --no-interaction --no-ansi > "$RUNNER_TEMP/s4-l12-rerun.log" 2>&1
           grep -q 'Nothing to migrate' "$RUNNER_TEMP/s4-l12-rerun.log"
           echo "S4_LARAVEL12_UPGRADE_RERUN_NOOP=PASS"
+          for suffix in '' _sandbox _storefront; do
+            db="gst_rc1_s4_upgrade${suffix}"
+            test "$(mysql -h 127.0.0.1 -uroot -N -B "$db" -e "SELECT COUNT(*) FROM s4_synthetic_integrity_fixture WHERE id=1 AND marker=SHA2('gst-rc1-disposable-fixture',256)")" = 1
+            echo "S4_L10_TO_L12_SYNTHETIC_ROW_INTEGRITY=PASS:${db}"
+          done
           # Restore the untouched pre-upgrade L10 snapshots to NEW schemas.
           # Do not drop any upgraded database or run migrate:rollback:
           # a live receipt ledger must never be silently erased.
@@ -203,13 +224,17 @@ jobs:
             # the primary DB is the new receipt ledger. Confirm the recovered
             # baseline matches the old baseline counts independently.
             if [ -z "$suffix" ]; then
-              test "$restored" -eq 152
-              test "$expected" -eq 153
+              test "$restored" -eq 153
+              test "$expected" -eq 154
             elif [ "$suffix" = _sandbox ]; then
-              test "$restored" -eq 138
+              test "$restored" -eq 139
+              test "$expected" -eq 140
             else
-              test "$restored" -eq 33
+              test "$restored" -eq 34
+              test "$expected" -eq 34
             fi
+            test "$(mysql -h 127.0.0.1 -uroot -N -B "$db" -e "SELECT COUNT(*) FROM s4_synthetic_integrity_fixture WHERE id=1 AND marker=SHA2('gst-rc1-disposable-fixture',256)")" = 1
+            echo "S7_RECOVERED_SYNTHETIC_ROW_INTEGRITY=PASS:${db}"
             python3 ../scripts/rc1-schema-fingerprint.py "$db" > "$RUNNER_TEMP/s7-recovered${suffix}.sha256"
             if ! cmp -s "$RUNNER_TEMP/s7-old${suffix}.sha256" "$RUNNER_TEMP/s7-recovered${suffix}.sha256"; then
               echo "STOP=S7_RELATIONAL_SCHEMA_FINGERPRINT_MISMATCH:${db}"
