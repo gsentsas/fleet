@@ -60,7 +60,7 @@ net=$(docker inspect "$container" --format '{{.HostConfig.NetworkMode}}')
 published=$(docker inspect "$container" --format '{{json .HostConfig.PortBindings}}')
 mem=$(docker inspect "$container" --format '{{.HostConfig.Memory}}')
 read_only=$(docker inspect "$container" --format '{{.HostConfig.ReadonlyRootfs}}')
-[[ "$net" == none && "$published" == null && "$mem" == 1073741824 && "$read_only" == true ]] || {
+[[ "$net" == none && ( "$published" == "{}" || "$published" == null ) && "$mem" == 1073741824 && "$read_only" == true ]] || {
   echo "RC1_RESTORE=NO_GO_ISOLATION_CONTRACT"; exit 2;
 }
 echo "RC1_RESTORE_ISOLATION=PASS"
