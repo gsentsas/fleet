@@ -326,3 +326,28 @@ The script initializes exactly two fictional tenants (`rc1-company-a`, `rc1-comp
 - All test-only candidate source files removed from the shared host; **no live application changes, no Composer lock change, no tag, merge or deployment**.
 
 **SECURITY_GATE=NO_GO** pending true authenticated HTTP integration tests proving company context is trustworthy, non-privileged caller cannot select another company's company session, fail-closed on blank session in real HTTP/FPM, and absence of CLI bypass on HTTP contexts. Also review other tenant lookup methods, since this patch only targets `findRecordOrFail`. Do **not** merge the candidate or RC1 PR #6 until those regressions and full-stack staging rollback pass. `PRODUCTION=NO_GO`.
+
+
+## Additional Core API tenant-boundary audit and five-path candidate fix — 2026-11-10
+
+Further inspection of the exact pinned `fleetbase/core-api` trait `HasApiModelBehavior.php` exposed **four related weak paths besides `findRecordOrFail`**:
+
+1. `getById`: conditional `company_uuid` scope only when `session('company')` present.
+2. `updateRecordFromRequest`: same conditional scope on an update target.
+3. `bulkRemove`: same conditional scope on bulk-deletion targets.
+4. `remove`: **no `company_uuid` scope even when the session company was set**.
+
+These are source-level risks; remote exploitation through a fully authenticated HTTP route has **not** been established.
+
+The isolated security candidate branch in `gsentsas/core-api`, `security/rc1-fail-closed-tenant-lookup-20261110`, was extended in commits `00e11d59` and `af969abe` (latter full SHA `af969abec0d2a77b319de9da6c0ebbeca3d2c843`). The candidate now applies a company constraint to `remove` and guards **five methods** against absent tenant session in non-CLI contexts, while preserving explicit CLI/worker compatibility. It has **NOT** been integrated into the pinned RC1 Composer lock.
+
+A reproducible synthetic regression script `scripts/rc1-core-tenant-mutation-candidate-lab.sh` (corrected at commit `940ebb8b`) mounts the candidate Core API source over the original vendor path **read-only** and executes PHP 8.2 + SQLite `:memory:` under Docker `--network none`, separately for pinned Laravel12 and historical Laravel10. The script validates:
+
+- With a company A session, direct deletion and bulk deletion attempts for company B leave **both synthetic orders untouched**.
+- With no active company and simulated non-CLI HTTP context (`APP_RUNNING_IN_CONSOLE=false`), `findRecordOrFail`, `getById`, `updateRecordFromRequest`, `remove`, and `bulkRemove` each **deny** the request, leaving all synthetic orders untouched.
+- **`RC1_L12_MUTATION_AND_FAIL_CLOSED=PASS`**, **`RC1_L10_MUTATION_AND_FAIL_CLOSED=PASS`**, committed script **`bash -n=PASS`, exit 0**.
+- Initial test harness versions did not supply a simulated Laravel route/controller or the expected MySQL-named SQLite resolver. Corrected the **test harness only**; no production source changes.
+- A separate prior candidate regression confirmed scoped A/B direct lookups and preservation of console-mode behavior. Other positive-session `getById` and `updateRecordFromRequest` branches need full database fixture/controller tests; this narrow script tests only their missing-company denial.
+- Temporary candidate source/test files were removed; no running test containers remain, live API/DB still healthy.
+
+**Security gating:** This is a successful **synthetic ORM-level five-path candidate test**, not a real authenticated HTTP two-user IDOR test. The possible risk of bypass through a CLI-context runtime, other lookup methods and actual API session-setting behavior remains to audit. **Candidate NOT MERGED, PR #6 DRAFT, PRODUCTION NO-GO**. Dedicated full-stack staging upgrade/rollback remains required.
