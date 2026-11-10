@@ -240,3 +240,13 @@ The complete, committed real-data laboratory script `scripts/rc1-real-laravel10-
 Checks run within one networkless Docker namespace, no public ports, no credentials, no write requests, no response bodies printed. Both `RC1_L12_UNAUTHENTICATED_ROUTE_DENIAL=PASS` and `RC1_L10_UNAUTHENTICATED_ROUTE_DENIAL=PASS`. The same rehearsal preserved all historical business-row hashes after Laravel12 migration, then restored 3/3 original database SQL hashes with pinned Laravel10 CLI startup PASS. **Full script exit code 0** and no remaining lab containers; production API/MySQL stayed healthy.
 
 **Boundary:** these are negative unauthorized GET checks, not actual authenticated API business workflows, tenant/IDOR coverage, worker processing, or socket failover. Those tests remain outstanding and production stays NO-GO.
+
+
+## Minimal isolated queue worker CLI bootstrap — Laravel 12 / Laravel 10 (2026-11-10)
+
+On the private host, both pinned runtimes were started in short-lived PHP containers with `--network none`, read-only code, transient storage, memory capped at 384 MiB and `QUEUE_CONNECTION=sync`. Both completed `artisan queue:work sync --once --stop-when-empty --sleep=0 --tries=1` successfully within a 25-second timeout:
+
+- `RC1_L12_QUEUE_WORKER_EMPTY_SYNC_BOOT=PASS`.
+- `RC1_L10_QUEUE_WORKER_EMPTY_SYNC_BOOT=PASS`.
+
+**This is only a CLI startup/empty-queue smoke.** It does not establish real Redis queue connectivity, job dispatch and completion, retries, delayed jobs, worker failover or sockets. Those remain **NOT TESTED** and cannot justify production GO.
