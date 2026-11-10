@@ -77,7 +77,7 @@ assert len(hits)==1
 print(hits[0])' "$name")
   docker exec "$container" mysql -uroot --protocol=socket -e "CREATE DATABASE \`$name\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" >/dev/null 2>&1
   diagnostics=$(mktemp /dev/shm/gst-rc1-l12-sql.XXXXXXXX)
-  if ! restic --no-lock dump "$snapshot" "$path" | gzip -dc | docker exec -i "$container" mysql -uroot --protocol=socket "$name" >/dev/null 2>"$diagnostics"; then
+  if ! restic --no-lock dump "$snapshot" "$path" | gzip -dc | docker exec -i "$container" mysql -uroot --protocol=socket --init-command="SET FOREIGN_KEY_CHECKS=0" "$name" >/dev/null 2>"$diagnostics"; then
     echo "RC1_REAL_L12_RESTORE_$name=NO_GO"
     code=$(grep -Eom 1 'ERROR [0-9]+' "$diagnostics" || true)
     echo "RC1_REAL_L12_MYSQL_CODE=${code:-UNCLASSIFIED}"
@@ -176,20 +176,27 @@ legacy_sha=67b2db64c7490599aaa6c799b26d5e4de897c25c
   echo "RC1_S7=NO_GO_PRE_RESTORE_NETWORK"; exit 2;
 }
 echo "RC1_S7_REAL_DATABASE_ROLLBACK_START"
+# Foreign keys can cross DBs, so RESET ALL THREE names as one operation.
+# This SQL can only reach the networkless disposable container checked above.
+diagnostics=$(mktemp /dev/shm/gst-rc1-s7-schema.XXXXXXXX)
+if ! docker exec "$container" mysql -uroot --protocol=socket -e "
+  SET FOREIGN_KEY_CHECKS=0;
+  DROP DATABASE \`fleetbase_storefront\`;
+  DROP DATABASE \`fleetbase_sandbox\`;
+  DROP DATABASE \`fleetbase\`;
+  CREATE DATABASE \`fleetbase\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+  CREATE DATABASE \`fleetbase_sandbox\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+  CREATE DATABASE \`fleetbase_storefront\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+" >/dev/null 2>"$diagnostics"; then
+  code=$(grep -Eom 1 'ERROR [0-9]+' "$diagnostics" || true)
+  echo "RC1_S7_RESET_THREE_SCHEMAS=NO_GO"
+  echo "RC1_S7_MYSQL_ERROR=${code:-UNCLASSIFIED}"
+  exit 2
+fi
+rm -f "$diagnostics"; diagnostics=""
+echo "RC1_S7_RESET_THREE_SCHEMAS=PASS"
 for pair in fleetbase:152 fleetbase_sandbox:138 fleetbase_storefront:33; do
   name=${pair%%:*}; expected=${pair##*:}
-  # Names are a static, audited whitelist and never user-supplied.
-  diagnostics=$(mktemp /dev/shm/gst-rc1-s7-schema.XXXXXXXX)
-  if ! docker exec "$container" mysql -uroot --protocol=socket -e "DROP DATABASE \`$name\`; CREATE DATABASE \`$name\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" >/dev/null 2>"$diagnostics"; then
-    code=$(grep -Eom 1 'ERROR [0-9]+' "$diagnostics" || true)
-    echo "RC1_S7_RECREATE_$name=NO_GO"
-    echo "RC1_S7_MYSQL_ERROR=${code:-UNCLASSIFIED}"
-    echo "RC1_S7_MYSQL_STATE=$(docker inspect "$container" --format 'running={{.State.Running}} oom={{.State.OOMKilled}}' 2>/dev/null || echo UNKNOWN)"
-    echo "RC1_S7_MYSQL_TMPFS=$(docker exec "$container" df -k /var/lib/mysql 2>/dev/null | awk 'NR==2 {print "free_kib="$4}' || true)"
-    exit 2
-  fi
-  rm -f "$diagnostics"; diagnostics=""
-  echo "RC1_S7_RECREATE_$name=PASS"
   path=$(restic --no-lock ls "$snapshot" --json | python3 -c '
 import json,sys
 name=sys.argv[1]
