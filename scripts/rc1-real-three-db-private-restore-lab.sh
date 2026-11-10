@@ -119,6 +119,53 @@ print(hits[0])
   [[ "$tables" == "$expected" ]] || { echo "RC1_RESTORE_TABLE_COUNT_$name=NO_GO"; exit 2; }
   echo "RC1_RESTORE_IMPORT_$name=PASS"
   echo "RC1_RESTORE_TABLE_COUNT_$name=$tables"
+
+  # Attest reference metadata and migration registry on the restored copy.
+  # These database metadata queries return only aggregate integers.
+  meta=$(docker exec "$container" mysql --protocol=socket -uroot -N -B -e "
+    SELECT COUNT(DISTINCT TABLE_NAME)
+      FROM information_schema.statistics
+      WHERE TABLE_SCHEMA='$name';
+    SELECT COUNT(*)
+      FROM information_schema.referential_constraints
+      WHERE CONSTRAINT_SCHEMA='$name';
+    SELECT COUNT(*)
+      FROM information_schema.triggers
+      WHERE TRIGGER_SCHEMA='$name';
+  ")
+  indexes=$(printf '%s\\n' "$meta" | sed -n '1p')
+  fks=$(printf '%s\\n' "$meta" | sed -n '2p')
+  triggers=$(printf '%s\\n' "$meta" | sed -n '3p')
+  [[ "$indexes" =~ ^[0-9]+$ && "$fks" =~ ^[0-9]+$ && "$triggers" =~ ^[0-9]+$ ]] || {
+    echo "RC1_RESTORE_METADATA_$name=NO_GO"; exit 2;
+  }
+  echo "RC1_RESTORE_INDEXED_TABLE_COUNT_$name=$indexes"
+  echo "RC1_RESTORE_FOREIGN_KEY_COUNT_$name=$fks"
+  echo "RC1_RESTORE_TRIGGER_COUNT_$name=$triggers"
+
+  case "$name" in
+    fleetbase) expected_migrations=394 ;;
+    fleetbase_sandbox) expected_migrations=304 ;;
+    fleetbase_storefront) expected_migrations=NONE ;;
+  esac
+  migration_table=$(docker exec "$container" mysql --protocol=socket -uroot -N -B -e "
+    SELECT COUNT(*) FROM information_schema.tables
+    WHERE TABLE_SCHEMA='$name' AND TABLE_NAME='migrations';
+  ")
+  if [[ "$expected_migrations" == NONE ]]; then
+    [[ "$migration_table" == 0 ]] || { echo "RC1_RESTORE_MIGRATION_REGISTRY_$name=NO_GO_UNEXPECTED_TABLE"; exit 2; }
+    echo "RC1_RESTORE_MIGRATION_REGISTRY_$name=ABSENT_EXPECTED"
+  else
+    [[ "$migration_table" == 1 ]] || { echo "RC1_RESTORE_MIGRATION_REGISTRY_$name=NO_GO_MISSING_TABLE"; exit 2; }
+    migrations=$(docker exec "$container" mysql --protocol=socket -uroot -N -B -e "SELECT COUNT(*) FROM \`$name\`.migrations;")
+    [[ "$migrations" == "$expected_migrations" ]] || {
+      echo "RC1_RESTORE_MIGRATION_REGISTRY_$name=NO_GO_COUNT_MISMATCH"
+      echo "RC1_RESTORE_MIGRATION_RECORDS_$name=$migrations"
+      exit 2
+    }
+    echo "RC1_RESTORE_MIGRATION_RECORDS_$name=$migrations"
+    echo "RC1_RESTORE_MIGRATION_REGISTRY_$name=PASS"
+  fi
 done
 
 echo "RC1_REAL_THREE_DB_IMPORT=PASS_ISOLATED"
