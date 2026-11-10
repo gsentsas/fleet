@@ -1,0 +1,171 @@
+name: GST RC1 S4 Laravel10-to-12 synthetic schema upgrade (NO GO)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/gst-rc1-s4-legacy-to-12.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-legacy-upgrade:
+    name: Laravel 10 schema to RC1 Laravel 12 on disposable MySQL (diagnostic)
+    if: github.event_name == 'pull_request' && github.head_ref == 'release/rc1-laravel12-consolidation-20261110'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      mysql:
+        image: mysql:8.0-oracle
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: 'yes'
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+    env:
+      COMPOSER_NO_INTERACTION: '1'
+      COMPOSER_PROCESS_TIMEOUT: '600'
+      APP_ENV: testing
+      APP_URL: http://localhost.test
+      DB_CONNECTION: mysql
+      DB_HOST: 127.0.0.1
+      DB_PORT: '3306'
+      DB_DATABASE: gst_rc1_s4_upgrade
+      DB_USERNAME: root
+      DB_PASSWORD: ''
+      CACHE_STORE: array
+      CACHE_DRIVER: array
+      QUEUE_CONNECTION: sync
+      SESSION_DRIVER: array
+      MAIL_MAILER: array
+      LOG_CHANNEL: stderr
+      TELESCOPE_ENABLED: 'false'
+      # Only ephemeral MySQL on the GitHub runner; never connect to actual fleetbase DB.
+    steps:
+      - name: Checkout pinned Laravel 10 baseline into separate directory
+        uses: actions/checkout@v4
+        with:
+          ref: 67b2db64c7490599aaa6c799b26d5e4de897c25c
+          path: baseline
+          persist-credentials: false
+
+      - name: Checkout exact RC1 candidate into separate directory
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: rc1
+          persist-credentials: false
+
+      - name: Install PHP 8.2 with required MySQL extensions
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, xml, gd, zip, pdo_mysql, pdo_sqlite, intl, bcmath, gmp
+          coverage: none
+
+      - name: Enforce pinned old and new Composer graph and DB isolation
+        run: |
+          set -euo pipefail
+          test "$(git -C baseline rev-parse HEAD)" = 67b2db64c7490599aaa6c799b26d5e4de897c25c
+          test "$(git -C rc1 rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          printf '%s  %s\n' 'be721c73404b686992d5971abe712ab2c373bd0e4ecc58bfb2d0a2021be5297c' 'rc1/api/composer.json' | sha256sum --check --status
+          printf '%s  %s\n' 'b73196821fe46d45eb8f4f9e2bd6b0df90a2e62d911b8f840c7fc243c94ba453' 'rc1/api/composer.lock' | sha256sum --check --status
+          test "$DB_HOST" = '127.0.0.1'
+          test "$DB_DATABASE" = 'gst_rc1_s4_upgrade'
+          php -r '
+          foreach (["baseline","rc1"] as $path) {
+            $l=json_decode(file_get_contents("$path/api/composer.lock"),true);
+            $versions=array_column($l["packages"],"version","name");
+            $major=(int)explode(".",ltrim($versions["laravel/framework"],"v"))[0];
+            if ($major!==($path==="baseline"?10:12)) exit(2);
+            echo "S4_PINNED_FRAMEWORK_$path=".$major."\n";
+          }
+          '
+          echo "S4_PINNED_OLD_AND_NEW_REFS=PASS"
+
+      - name: Create three isolated disposable schemas
+        run: |
+          set -euo pipefail
+          mysql -h 127.0.0.1 -uroot <<'SQL'
+          CREATE DATABASE gst_rc1_s4_upgrade CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+          CREATE DATABASE gst_rc1_s4_upgrade_sandbox CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+          CREATE DATABASE gst_rc1_s4_upgrade_storefront CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+          SQL
+          echo "S4_ISOLATED_THREE_DB=PASS"
+
+      - name: Install Laravel 10 locked dependencies (historical baseline only)
+        env:
+          GH_JOB_TOKEN: ${{ github.token }}
+        working-directory: baseline/api
+        run: |
+          set -euo pipefail
+          composer config --global github-oauth.github.com "$GH_JOB_TOKEN"
+          # Old historical lock has known advisories. This step is NOT a security
+          # approval, and will never waive the strict RC1 Composer audit.
+          COMPOSER_NO_AUDIT=1 composer install --no-interaction --prefer-dist --no-progress --no-ansi --no-scripts
+          test -z "$(git status --porcelain -- composer.json composer.lock)"
+          echo "S4_LEGACY_LOCK_INSTALL=PASS_HISTORICAL_ONLY"
+
+      - name: Build a synthetic Laravel 10 schema using real baseline migrations
+        working-directory: baseline/api
+        run: |
+          set -euo pipefail
+          export APP_KEY="$(php -r 'echo "base64:".base64_encode(random_bytes(32));')"
+          if ! php artisan migrate --force --no-interaction --no-ansi > "$RUNNER_TEMP/s4-l10-migrate.log" 2>&1; then
+            echo "STOP=LARAVEL10_BASELINE_MIGRATE_FAILED"
+            tail -n 60 "$RUNNER_TEMP/s4-l10-migrate.log"
+            exit 2
+          fi
+          mysql -h 127.0.0.1 -uroot -N -B gst_rc1_s4_upgrade -e 'SELECT COUNT(*) FROM migrations' | awk '{if ($1<200) exit 2; print "S4_LARAVEL10_MIGRATION_ROWS="$1}'
+          mysql -h 127.0.0.1 -uroot -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='gst_rc1_s4_upgrade' AND table_type='BASE TABLE'" | awk '{if ($1<100) exit 2; print "S4_LARAVEL10_TABLES="$1}'
+          echo "S4_LARAVEL10_SYNTHETIC_SCHEMA=PASS"
+
+      - name: Install Laravel 12 pinned candidate and run strict security audit
+        env:
+          GH_JOB_TOKEN: ${{ github.token }}
+        working-directory: rc1/api
+        run: |
+          set -euo pipefail
+          composer config --global github-oauth.github.com "$GH_JOB_TOKEN"
+          composer install --no-interaction --prefer-dist --no-progress --no-ansi --no-scripts
+          composer audit --locked --format=plain
+          test -z "$(git status --porcelain -- composer.json composer.lock)"
+          echo "S4_RC1_LOCK_STRICT_AUDIT=PASS"
+
+      - name: Upgrade the SAME three disposable Laravel 10 schemas with Laravel 12
+        working-directory: rc1/api
+        run: |
+          set -euo pipefail
+          export APP_KEY="$(php -r 'echo "base64:".base64_encode(random_bytes(32));')"
+          # No real customers, no production credentials and no outbound integrations.
+          # The previous Laravel 10 step intentionally populated these exact DBs.
+          if ! php artisan migrate --force --no-interaction --no-ansi > "$RUNNER_TEMP/s4-l12-upgrade.log" 2>&1; then
+            echo "STOP=LARAVEL10_TO_12_SYNTHETIC_UPGRADE_FAILED"
+            tail -n 65 "$RUNNER_TEMP/s4-l12-upgrade.log"
+            exit 2
+          fi
+          mysql -h 127.0.0.1 -uroot -N -B gst_rc1_s4_upgrade -e "SELECT COUNT(*) FROM migrations WHERE migration='2026_11_08_000001_create_telematic_webhook_receipts_table'" | grep -qx 1
+          mysql -h 127.0.0.1 -uroot -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='gst_rc1_s4_upgrade' AND table_name='telematic_webhook_receipts'" | grep -qx 1
+          echo "S4_LARAVEL10_TO_12_SYNTHETIC_SCHEMA_UPGRADE=PASS"
+          php artisan migrate --force --no-interaction --no-ansi > "$RUNNER_TEMP/s4-l12-rerun.log" 2>&1
+          grep -q 'Nothing to migrate' "$RUNNER_TEMP/s4-l12-rerun.log"
+          echo "S4_LARAVEL12_UPGRADE_RERUN_NOOP=PASS"
+          echo "S4_REAL_PRODUCTION_SNAPSHOT_UPGRADE=NOT_TESTED"
+          echo "S7_REAL_ROLLBACK=NOT_TESTED"
+          echo "PRODUCTION_DECISION=NO_GO"
+
+      - name: Print scoped diagnostic logs on failure
+        if: failure()
+        run: |
+          for log in "$RUNNER_TEMP"/s4-l10-migrate.log "$RUNNER_TEMP"/s4-l12-upgrade.log "$RUNNER_TEMP"/s4-l12-rerun.log; do
+            if test -f "$log"; then
+              echo "DIAGNOSTIC_LOG=$(basename "$log")"
+              tail -n 40 "$log"
+            fi
+          done
