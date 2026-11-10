@@ -65,6 +65,17 @@ foreach (['rc1-company-a'=>'rc1-order-a','rc1-company-b'=>'rc1-order-b'] as $com
         // Expected denial: company UUID constraint on the real Fleetbase trait.
     }
 }
+// A request with missing company context must fail closed. Diagnose the
+// precise underlying model lookup independently from HTTP middleware.
+$app->make('session.store')->forget('company');
+$missingCompany=session('company');
+if ($missingCompany!==null) { echo "NO_GO_SESSION_RESET\n";exit(2); }
+try {
+    $leaked=Rc1LookupOrder::findRecordOrFail('rc1-order-b');
+    echo "RC1_MISSING_COMPANY_LOOKUP=FAIL_OPEN_CONFIRMED\n";
+} catch (Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+    echo "RC1_MISSING_COMPANY_LOOKUP=FAIL_CLOSED\n";
+}
 echo "PASS_TWO_COMPANIES_AND_IDOR_LOOKUPS\n";
 PHP
 chmod 400 "$probe"
@@ -88,10 +99,15 @@ for version in L12 L10; do
       fleetbase/fleetbase-api:v0.7.75 /tmp/rc1-tenants.php 2>/dev/null) || {
         echo "RC1_TENANCY_$version=NO_GO_RUNTIME"; exit 2;
       }
-    [[ "$result" == PASS_TWO_COMPANIES_AND_IDOR_LOOKUPS ]] || {
+    [[ "$result" == *PASS_TWO_COMPANIES_AND_IDOR_LOOKUPS* ]] || {
       echo "RC1_TENANCY_$version=NO_GO_ASSERTION"; exit 2;
     }
     echo "RC1_TENANCY_$version=PASS_FILTER_AND_DIRECT_LOOKUP"
+    if [[ "$result" == *RC1_MISSING_COMPANY_LOOKUP=FAIL_OPEN_CONFIRMED* ]]; then
+        echo "RC1_MISSING_COMPANY_LOOKUP_$version=FAIL_OPEN_CONFIRMED"
+    elif [[ "$result" == *RC1_MISSING_COMPANY_LOOKUP=FAIL_CLOSED* ]]; then
+        echo "RC1_MISSING_COMPANY_LOOKUP_$version=FAIL_CLOSED"
+    else echo "RC1_MISSING_COMPANY_LOOKUP_$version=NO_GO_UNKNOWN";exit 2; fi
 done
 echo RC1_AUTHENTICATED_HTTP_TENANCY=NOT_TESTED
 echo RC1_PRODUCTION=NO_GO
