@@ -6,7 +6,7 @@
 
 - Running Fleetbase on mail01: `/opt/gst-fleet`, git `67b2db6` (Laravel 10 baseline). Eight operational Docker services, no RC1 test container left behind.
 - Production schema aggregates: `fleetbase` 152 tables and 394 migration records (batch 2); `fleetbase_sandbox` 138 tables and 304 migration records (batch 3); `fleetbase_storefront` 33 tables, no local `migrations` table.
-- Storefront provider `gsentsas/storefront@b6d5961` registers migrations with `loadMigrationsFrom` in `server/src/Providers/StorefrontServiceProvider.php`; the `fleetbase` register contains 22 migration names matching a broad storefront/store/catalog/cart/checkout pattern. **This is a clue, not complete migration accounting.** The correct registry and connection mapping must be verified on the exact candidate.
+- **Exact S3 source-vs-registry audit:** compare all migration filenames from the pinned Core API `f81cf74e` (`migrations/`), FleetOps `665e4fdf` (`server/migrations/`), and Storefront `b6d5961` (`server/migrations/`) against the live migration-name registers, read-only. Core **123/123** main and **123/123** sandbox; FleetOps **172/173** main and **172/173** sandbox; Storefront **55/55** main and **0/55** sandbox. The sole absent FleetOps name is `2026_11_08_000001_create_telematic_webhook_receipts_table`. Storefront's provider registers its migrations using `loadMigrationsFrom`; its **55/55 entries appear in the main** `fleetbase.migrations` table, so the missing `fleetbase_storefront.migrations` table is not by itself a fault. This comparison covers **only those three packages** (351 migration files); it does not prove accounting for other packages or actual Laravel 12 upgrade behavior.
 - Restic snapshot `860ef168` (2026-11-10) restored all 3 SQL dumps in isolated MySQL 8.0.46: 152 / 138 / 33 base tables. Test container used `--network none`, no ports or bind mounts, and was removed; active production containers remained unchanged.
 - RC1 run `42812781069` proved 395 package migrations on three **fresh** MySQL databases and anti-replay; it did **not** prove migration of restored Laravel 10 data.
 - Host safety: 49 GiB free of 697 GiB (~94% used), ~4.9 GiB memory available, swap absent. This is a multi-tenant application host. RC1 application image not installed/pinned here.
@@ -26,4 +26,4 @@
 
 Missing image digest or migration plan; insufficient disk/RAM; any production endpoint/mount/secret; unsafe outbound traffic; unknown historical migrations; failed restoration, schema/data checks or rollback.
 
-**Current decision:** `S2_RESTORE=PASS`, `S3_MIGRATION_MAPPING=PARTIAL`, `S4_LEGACY_UPGRADE=NOT_RUN`, `S7_ROLLBACK=NOT_RUN`, `PRODUCTION=NO_GO`.
+**Current decision:** `S2_RESTORE=PASS`, `S3_THREE_FORK_MIGRATION_MAPPING=PASS_WITH_ONE_PENDING`, `S4_LEGACY_UPGRADE=NOT_RUN`, `S7_ROLLBACK=NOT_RUN`, `PRODUCTION=NO_GO`.
