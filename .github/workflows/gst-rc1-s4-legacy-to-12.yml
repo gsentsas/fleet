@@ -200,6 +200,21 @@ jobs:
           php artisan migrate --force --no-interaction --no-ansi > "$RUNNER_TEMP/s4-l12-rerun.log" 2>&1
           grep -q 'Nothing to migrate' "$RUNNER_TEMP/s4-l12-rerun.log"
           echo "S4_LARAVEL12_UPGRADE_RERUN_NOOP=PASS"
+          # Validate the Laravel 12 application bootstrap and registered routes,
+          # not only the resulting SQL structure. Testing env disables integrations.
+          if ! php artisan route:list --json > "$RUNNER_TEMP/s4-l12-routes.json" 2>"$RUNNER_TEMP/s4-l12-routes.err"; then
+            echo "STOP=RC1_LARAVEL12_ROUTE_BOOTSTRAP_FAILED"
+            tail -n 45 "$RUNNER_TEMP/s4-l12-routes.err"
+            exit 2
+          fi
+          php -r '
+          $routes=json_decode(file_get_contents(getenv("RUNNER_TEMP")."/s4-l12-routes.json"),true);
+          if (!is_array($routes) || count($routes)<50) {
+            fwrite(STDERR,"STOP=RC1_LARAVEL12_ROUTE_CATALOG_TOO_SMALL_OR_INVALID\n");
+            exit(2);
+          }
+          echo "S4_LARAVEL12_APPLICATION_ROUTE_BOOTSTRAP=PASS:".count($routes)."\n";
+          '
           for suffix in '' _sandbox _storefront; do
             db="gst_rc1_s4_upgrade${suffix}"
             test "$(mysql -h 127.0.0.1 -uroot -N -B "$db" -e "SELECT COUNT(*) FROM s4_synthetic_integrity_fixture WHERE id=1 AND marker=SHA2('gst-rc1-disposable-fixture',256)")" = 1
