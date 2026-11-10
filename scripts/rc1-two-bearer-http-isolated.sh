@@ -10,8 +10,8 @@ export RESTIC_REPOSITORY=/root/gstfleet-secure-repository RESTIC_PASSWORD_FILE=/
 [[ "$(docker image inspect fleetbase/fleetbase-api:v0.7.75 --format '{{.Id}}')" == sha256:413e497080156b692e089106c37555a1e33edabda1bb0b6f09c104b7a2c6171a ]] || exit 2
 [[ "$(docker image inspect redis:7.4-alpine --format '{{.Id}}')" == sha256:98c6ca8f397f86e469be752c3e7ed5eb8b17f2479840cb69a2e413037038e9f4 ]] || exit 2
 name="gst-rc1-http-auth-db-$$"
-web="gst-rc1-http-auth-web-$"
-redis="gst-rc1-http-auth-redis-$"
+web="gst-rc1-http-auth-web-$$"
+redis="gst-rc1-http-auth-redis-$$"
 trap 'docker rm -f "$web" "$redis" "$name" >/dev/null 2>&1 || true; echo RC1_AUTH_HTTP_CLEANUP=ATTEMPTED' EXIT
 docker run --rm -d --name "$name" --network none --memory 1536m --memory-swap 1536m --cpus 1 --pids-limit 128 --read-only --tmpfs /var/lib/mysql:rw,nosuid,nodev,size=768m,mode=1777 --tmpfs /var/run/mysqld:rw,nosuid,nodev,size=32m,mode=1777 --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 -e MYSQL_ALLOW_EMPTY_PASSWORD=yes mysql:8.0-oracle --bind-address=127.0.0.1 --skip-name-resolve >/dev/null
 [[ "$(docker inspect "$name" --format '{{.HostConfig.NetworkMode}} {{json .HostConfig.PortBindings}}')" == 'none {}' ]] || exit 2
