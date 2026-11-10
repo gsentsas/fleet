@@ -143,3 +143,31 @@ The latest committed `scripts/rc1-real-three-db-private-restore-lab.sh` was reru
 No tables were printed and no user data exported or logged. Registry record counts exactly match the previously audited production baseline. The first trial of this additional metadata assertion failed because of incorrectly escaped `printf` newlines; commit `f416e1f1` corrected only the test harness, then the complete rerun succeeded.
 
 **Important boundary:** this is a successful **MySQL restoration plus relational-metadata consistency proof**, not Laravel 12 running on the restored databases. No RC1 application runtime, migration or full application+data rollback was executed. `PRODUCTION=NO_GO`.
+
+
+## First actual Laravel 12 upgrade AND Laravel 10 CLI/database rollback rehearsal — PASS (2026-11-10)
+
+**Real backup data, in a restricted disposable local Docker laboratory on mail01; no live production DB connection.** This extends earlier synthetic tests and does not authorize a production release.
+
+Pinned runtime artifacts:
+- Laravel 12 source SHA `31a6a026c7062b3febe2ff90d0927f16a74bf834`, pinned Composer JSON/LOCK SHA-256 values already validated by CI, PHP 8.2, dependencies installed separately with `--no-scripts --no-plugins`. Route bootstrap loaded **1,839 routes**.
+- Laravel 10 historical source SHA `67b2db64c7490599aaa6c799b26d5e4de897c25c`, content exported from the exact historical Git object into a separate private directory, Composer.lock SHA-256 verified, PHP 8.2, separate locked dependencies/autoload PASS. Its historical dependencies have legacy advisories; this rehearsal is not a security approval.
+- Existing three encrypted daily Restic SQL dumps were streamed locally to MySQL 8.0 in a **networkless** Docker container. All three backups were successfully imported. MySQL data was `tmpfs` only (768 MiB), no public ports, no host database mount, RAM limited to 1536 MiB. PHP CLI ran separately with `--network container:<temporary-mysql>`, no outbound network, read-only application mount and ephemeral caches, memory limited to 512 MiB.
+
+**S4 actual upgrade results:**
+| DB | Initial tables | Laravel 12 tables | Historical migration records | After Laravel 12 |
+|---|---:|---:|---:|---:|
+| `fleetbase` | 152 | 153 | 394 | 395 |
+| `fleetbase_sandbox` | 138 | 139 | 304 | 305 |
+| `fleetbase_storefront` | 33 | 33 | No registry | No registry |
+
+`php artisan migrate:status`, `php artisan migrate --force`, and `php artisan sandbox:migrate --force` on genuine restored databases all **PASS**.
+
+**S7 rollback rehearsal results:** Before migration, SHA-256 digests of canonical MySQL SQL dumps were captured for each database, without disclosing data. Initial rollback attempt hit MySQL `ERROR 3730` due to inter-schema foreign keys. Corrected the lab to **drop and recreate all three disposable schemas as a coordinated operation with FOREIGN_KEY_CHECKS=0 only inside the networkless disposable MySQL**, then replay the pinned Restic archives. The final run achieved:
+- Three databases restored to exactly **152 / 138 / 33 tables**, with **3/3 canonical SQL content SHA-256 fingerprints identical** to the before-upgrade databases.
+- Historical migration registries restored to **394 / 304**, and the RC1-only `telematic_webhook_receipts` table absent from the restored historical schema.
+- **Pinned Laravel 10 CLI** `php artisan migrate:status` PASS against recovered MySQL, and `php artisan route:list --json` PASS.
+- Reproducible script: `scripts/rc1-real-laravel10-rollback-rehearsal.sh`; **`RC1_S7_ISOLATED_DB_AND_LARAVEL10_CLI_ROLLBACK=PASS`**, **exit 0**.
+- No leftover `gst-rc1-*` lab containers at postflight; 8/8 Fleetbase production containers remain Up, backup/offsite latest Result=success, production checkout unchanged at `67b2db64`.
+
+**Remaining gates:** This proves a **three-DB real-data upgrade/recovery plus pinned Laravel 10 CLI boot**, NOT an end-to-end HTTP/socket/queue/worker restore, full application traffic switch or production rollback. It does not fully prove post-upgrade tenant-level business invariants or external service isolation in a real multi-container staging topology. Therefore **PR #6 remains DRAFT; production GO/NO-GO = NO-GO** until a formal dedicated staging full-stack E2E rehearsal and change approval.
