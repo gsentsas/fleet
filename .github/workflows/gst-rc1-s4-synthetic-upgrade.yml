@@ -124,7 +124,7 @@ jobs:
           $q=$p->query("SELECT COUNT(*) FROM migrations WHERE migration=\x272026_11_08_000001_create_telematic_webhook_receipts_table\x27")->fetchColumn();
           if ((int)$q!==1) exit(2);
           $c=$p->query("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=\x27gst_rc1_s4_synthetic\x27 AND table_name=\x27telematic_webhook_receipts\x27")->fetchColumn();
-          if ((int)$c!==8) exit(3);
+          if ((int)$c!==9) exit(3);
           echo "S4_RECEIPT_INCREMENTAL_MIGRATION=PASS\n";
           '
           php artisan migrate --force --no-interaction --no-ansi > "$RUNNER_TEMP/s4-rerun.log" 2>&1
