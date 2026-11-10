@@ -204,3 +204,21 @@ Committed test `scripts/rc1-real-laravel10-rollback-rehearsal.sh` at commit `063
 - Full script: **exit 0**, no remaining temporary lab containers, production API/MySQL healthy.
 
 **Limitations:** Data-only dump fingerprints capture business row values as serialized by pinned MySQL with primary-key ordering. They do not prove all integration/HTTP/socket/worker flows under real traffic; no production upgrade occurred and PR #6 stays DRAFT. The full-stack rollback gate remains NO-GO.
+
+
+## Actual HTTP health checks on Laravel 12 and restored Laravel 10 — PASS (2026-11-10)
+
+A **real HTTP server** was started for each runtime inside Docker with `--network container:<networkless-disposable-mysql>`; only the container-internal loopback address `127.0.0.1:18770` was bound. **No port was published, no external network access was available**, no production APIs or databases were called. The `GET /health` endpoint was discovered in the application's real route registry (Laravel 12: 1,839 routes).
+
+The new HTTP probes are included in the complete, committed `scripts/rc1-real-laravel10-rollback-rehearsal.sh` (change `6ba2c950`). They use an ephemeral PHP 8.2 container with the pinned Laravel 12/10 source mounted read-only, transient storage and caches, explicit testing environment and the restored MySQL database over loopback. No HTTP bodies or customer records are printed.
+
+- Actual encrypted Restic backups restored: **152/138/33 tables** on disposable MySQL 8.
+- Laravel 12 migration PASS: **153/139/33**, migration registries **395/305**.
+- Business-row values/row-count hashes after upgrade: **PASS in all three databases**.
+- **Laravel 12 HTTP `GET /health` → status 200, PASS**.
+- Recovery of original MySQL schema and data: **3/3 canonical SQL content hashes match**, migration registries **394/304**.
+- Historical pinned Laravel 10 CLI route bootstrap and DB migration status PASS.
+- **Laravel 10 HTTP `GET /health` → status 200, PASS** after restore.
+- Complete script **exit 0**; ephemeral lab containers removed and production API/MySQL healthy.
+
+**Scope:** an HTTP health smoke and database/CLI rollback are not a full end-to-end HTTP workflow, queue/worker or socket failover. These require dedicated full-stack staging with safe egress rules before releasing. `PRODUCTION=NO_GO`.
