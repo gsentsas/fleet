@@ -297,3 +297,18 @@ The newly versioned `scripts/rc1-isolated-redis-failed-job-persistence.sh` (comm
 - `RC1_FAILED_JOBS_L12_L10=PASS_EPHEMERAL`; **run exit 0**. Lab source was removed from `/dev/shm`, both test containers were destroyed and verified absent; original production MySQL and Queue remained healthy.
 
 **Scope:** This is genuine Laravel Redis → worker → **MySQL failed-job persistence**, but the `failed_jobs` table was created explicitly in a clean, disposable MySQL database with the expected structure, not proven against a production-size restored database. It does not verify monitoring/alerts, `queue:retry` manual replay, queue ordering, dead-letter procedures or business job effects. End-to-end authenticated tenant/IDOR API scenarios and a full private staging multi-service rollback remain **NOT TESTED**. `PRODUCTION=NO_GO`.
+
+
+## Synthetic two-organization order tenant isolation — list filters AND direct record lookup (2026-11-10)
+
+The committed script `scripts/rc1-two-tenant-synthetic-order-scope.sh` (latest change `6e4eb5f9`) was executed as checked out from the RC1 branch, with `bash -n=PASS` and **exit 0**. Runs separately with the pinned Laravel12 and historical Laravel10 vendors in ephemeral PHP 8.2 containers (`--network none`, read-only application and test script mounts, memory cap 384 MiB, SQLite in-memory only).
+
+The script initializes exactly two fictional tenants (`rc1-company-a`, `rc1-company-b`) and one fictional order in each; it exercises **the actual installed `Fleetbase\\FleetOps\\Http\\Filter\\OrderFilter::queryForPublic`** and **`Fleetbase\\Traits\\HasApiModelBehavior::findRecordOrFail`** with the test session's company set to each tenant:
+
+- A and B each retrieve **only their own order** through the filter despite a forged `company_uuid` query parameter.
+- The direct record lookup retrieves an own order and throws `ModelNotFoundException` for a foreign order; both A→B and B→A denied.
+- **`RC1_TENANCY_L12=PASS_FILTER_AND_DIRECT_LOOKUP`**.
+- **`RC1_TENANCY_L10=PASS_FILTER_AND_DIRECT_LOOKUP`**.
+- Test code removed from `/dev/shm` and no containers left; production app/database remained healthy.
+
+**Important security boundary / outstanding gate:** This synthetic test **sets the session's company explicitly**. The real `findRecordOrFail` source applies the company constraint only if a company is present in the session; it does not prove that authenticating a real client always establishes the correct company context or that all HTTP controllers/routes enforce it. Thus two genuinely authenticated HTTP identities, positive/negative cross-tenant IDOR responses, org-switching and role/permission cases are **NOT TESTED**. Fail-closed behavior when authenticated session company is absent must be separately assessed before production. **Do not mark the HTTP IDOR gate as PASS.** `PRODUCTION=NO_GO`.
