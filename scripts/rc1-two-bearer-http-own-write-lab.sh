@@ -122,12 +122,21 @@ for side in a b; do
  own_delete=$(docker exec "$web" curl -s -o /dev/null -w '%{http_code}' --max-time 20 --request DELETE -H 'Accept: application/json' -H "Authorization: Bearer $token" "http://127.0.0.1:18770/v1/orders/$own" || echo ERROR)
  echo "RC1_SIDE_$side OWN_DELETE=$own_delete"
  own_deleted=$(docker exec "$name" mysql -uroot --protocol=socket -N -B -e "SELECT COUNT(*) FROM fleetbase.orders WHERE public_id='$own' AND deleted_at IS NOT NULL;")
- foreign_untouched=$(docker exec "$name" mysql -uroot --protocol=socket -N -B -e "SELECT COUNT(*) FROM fleetbase.orders WHERE public_id='$foreign' AND deleted_at IS NULL;")
- [[ "$own_delete" == 200 && "$own_deleted" == 1 && "$foreign_untouched" == 1 ]] || {
+ # The other company's order is still active during A's deletion;
+ # during B's deletion it was already legitimately soft-deleted by A.
+ if [[ "$side" == a ]]; then
+   foreign_expected=$(docker exec "$name" mysql -uroot --protocol=socket -N -B -e "SELECT COUNT(*) FROM fleetbase.orders WHERE public_id='$foreign' AND deleted_at IS NULL;")
+ else
+   foreign_expected=$(docker exec "$name" mysql -uroot --protocol=socket -N -B -e "SELECT COUNT(*) FROM fleetbase.orders WHERE public_id='$foreign' AND deleted_at IS NOT NULL;")
+ fi
+ [[ "$own_delete" == 200 && "$own_deleted" == 1 && "$foreign_expected" == 1 ]] || {
    echo "RC1_SIDE_$side=NO_GO_OWN_DELETE_OR_SQL_ASSERTION";exit 2;
  }
  echo "RC1_SIDE_$side=PASS_OWN_DELETE_SQL"
 done
+final_deleted=$(docker exec "$name" mysql -uroot --protocol=socket -N -B -e "SELECT COUNT(*) FROM fleetbase.orders WHERE public_id IN ('rc1-test-order-a','rc1-test-order-b') AND deleted_at IS NOT NULL AND notes='rc1-own-tenant-updated';")
+[[ "$final_deleted" == 2 ]] || { echo RC1_FINAL_TWO_OWN_SOFT_DELETES=NO_GO; exit 2; }
+echo RC1_FINAL_TWO_OWN_SOFT_DELETES=PASS
 echo RC1_REAL_TWO_BEARER_HTTP_OWN_PUT_DELETE=PASS
 
 echo RC1_REAL_TWO_BEARER_HTTP_ORDER_IDOR=PASS
