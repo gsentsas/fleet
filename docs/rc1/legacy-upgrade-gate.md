@@ -107,3 +107,23 @@ A pinned daily Restic snapshot (ID prefix `860ef168c572`) was streamed directly 
 | `fleetbase_storefront` | 33 | 2 | 73,085 |
 
 All three **structural presence checks PASS** and match the audited live table counts. These are statement counts, **not data row counts, parse validity, SQL import success, consistency, or rollback evidence**. The application and MySQL production containers were verified healthy following execution. No actual MySQL import, migration, service restart, data extraction or staging installation occurred. `PRODUCTION=NO_GO`.
+
+
+## First isolated import of all three genuine backup databases — PASS (2026-11-10)
+
+The committed `scripts/rc1-real-three-db-private-restore-lab.sh` was executed against immutable daily Restic snapshot prefix `860ef168c572` on `mail01`. **Real production SQL exports were imported into a disposable MySQL 8 container; no connection to production MySQL occurred.**
+
+**Isolation:** Docker network `none`, no published ports, no host/project mount, read-only root filesystem; `/var/lib/mysql` was an ephemeral `tmpfs` (768 MiB maximum), container memory+swap capped at 1536 MiB, 1 CPU and 128 PIDs. `MYSQL_ALLOW_EMPTY_PASSWORD` was permitted **only** inside this networkless socket-only disposable MySQL instance. Container was removed afterward; verification showed no remaining `gst-rc1-private-restore-*` container. Production Fleetbase API/MySQL remained `running, healthy`.
+
+**Critical diagnostic/correction:** Early attempts returned MySQL client `ERROR 2013` because `mysqladmin ping` was detecting the official image's **temporary bootstrap server**. MySQL's entrypoint intentionally shuts that server down before launching the final server; imports raced the shutdown. The script now waits for `MySQL init process done. Ready for start up.` **and** a responsive local MySQL socket. Merely raising memory limits was not the fix.
+
+| Genuine backup restored to isolated MySQL 8 | Import result | Base tables after import |
+|---|---|---:|
+| `fleetbase.sql.gz` | PASS | **152** |
+| `fleetbase_sandbox.sql.gz` | PASS | **138** |
+| `fleetbase_storefront.sql.gz` | PASS | **33** |
+| **All three** | **PASS** | **323** |
+
+**Final execution:** `bash -n=PASS`, `RC1_RESTORE_ISOLATION=PASS`, `RC1_RESTORE_MYSQL_FINAL_START=PASS`, `RC1_REAL_THREE_DB_IMPORT=PASS_ISOLATED`, exit code **0**, automatic lab cleanup attempted and verified no leftover container.
+
+**Remaining production gates:** Laravel 12 migration against this restored existing-data set, post-migration row counts/business invariants and full application+DB rollback with the pinned Laravel 10 runtime are **NOT RUN**. The one-shot MySQL restore succeeded, but a full private staging environment remains unqualified; no merge, tag, public CI with customer data, or live deployment. `PRODUCTION=NO_GO`.
