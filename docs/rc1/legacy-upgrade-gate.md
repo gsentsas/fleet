@@ -554,3 +554,19 @@ The executable `scripts/rc1-sanctum-four-profile-iam-lab.sh` (commit `422faaaa3d
 Both scripts enforce a host RAM preflight and ephemeral `--network none` Docker with no published ports, read-only product source, disposable credentials/records, SQL restoration isolated from live data, and cleanup of temporary container and candidate PHP files. No merge, Composer lock update, deployment, production permission/catalog change, service restart or tag.
 
 **Release decision:** `MISSING_ORDER_PERMISSION_FAIL_OPEN=REPRODUCED_UNPATCHED`, `ORDER_GUARD_FAIL_CLOSED_CANDIDATE=PASS_HTTP`, `OTHER_RESOURCES_CATALOG_ABSENCE=NOT_COVERED`, `RC1_COMPOSER_PIN_AND_CI=NOT_DONE`, `FULL_STACK_STAGING_ROLLBACK=NOT_DONE`. **PR #6 DRAFT; PRODUCTION NO-GO.**
+
+
+## Generalized protected resource authorization fail-closed — Orders AND Contacts PASS HTTP (2026-11-10)
+
+**Candidate Core API fix** on `security/rc1-fail-closed-tenant-lookup-20261110`, commit `e2076d396af95dbe77823f670cd50d4f12671e0c`, modifies `src/Http/Middleware/AuthorizationGuard.php`. Instead of treating `order` as a special case and checking `Auth::isResourceGuarded` (which fails when the entire catalog is missing), **any non-admin request to a controller declaring `getResourceSingularName` in the protected middleware is rejected if `Auth::resolvePermissionsFromRequest` returns an empty set**, except methods with explicit `SkipAuthorizationCheck`. Legacy behavior is deliberately retained for controllers **without** this resource contract, pending route classification; those are not proven fail-closed by this change. Existing non-empty required-permission checks remain unchanged, and admin paths continue their existing behavior. **Exemptions' live HTTP behavior requires a separate compatibility test; only source-level preservation was verified here.**
+
+**Reproducible lab** `scripts/rc1-sanctum-multi-resource-catalog-fail-closed-lab.sh` created at commit `30432d7f0af1ff7ad1aef93a21560a129a593c08`. Executed with the exact pinned Laravel12 runtime, security candidates for Core API session and tenant lookup, and new guarded middleware all mounted **read-only** over installed vendor; no Composer lock integration. MySQL8 restored from Restic (152 tables), Redis7.4, PHP HTTP all disposable with Docker `--network none`, no published ports, resource quotas, synthetic identities and a 5GiB host RAM preflight. `bash -n=PASS`, candidate middleware `php -l=PASS`, final **EXIT 0**.
+
+**Observed true HTTP and SQL checks**:
+- Normal catalog, genuine Sanctum tokens and 4 IAM profiles: `RC1_SANCTUM_FOUR_PROFILE_IAM=PASS`, including no-role denial, reader permitted reads but forbidden PUT/DELETE, editor permitted PUT verified with disposable SQL, admin permitted own read, foreign read hidden.
+- Omitted exact/wildcard permissions for orders, with FK-constrained permission UUID rows left intact: `RC1_PARTIAL_CATALOG_NO_ROLE=401 READER=401 ADMIN=200` → **PASS**.
+- Entire order permission catalog names omitted: `RC1_FULL_CATALOG_NO_ROLE=401 ADMIN=200` → **PASS**.
+- **Entire contact permission catalog names omitted**: `RC1_FULL_CONTACT_CATALOG_NO_ROLE=401 READER=401 ADMIN=200` → `RC1_CONTACT_RESOURCE_FAIL_CLOSED=PASS`, proving behavior beyond orders.
+- `RC1_MISSING_PERMISSION_GUARD_CANDIDATE=PASS_MULTI_RESOURCE`, script EXIT 0; no production writes, merges, tags or restarts. Temporary containers, credentials and guard candidate source removed after test.
+
+**Remaining gates:** audit/HTTP regressions for intentional `SkipAuthorizationCheck` exemptions and controllers lacking a resource contract; verify other protected resources and high-risk actions, add the candidate Core API commit to a reproducible RC1 dependency pin, complete CI and full multi-service staging upgrade/rollback. `PRODUCTION=NO_GO`; PR #6 DRAFT, security fix not integrated.
