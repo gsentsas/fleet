@@ -72,3 +72,15 @@ A single **already locally available** `php:8.3-fpm-alpine` container was launch
 Docker `inspect` proved: `NETWORK=none`, `MEM_BYTES=134217728`, `MEM_SWAP=134217728`, `NANO_CPUS=500000000`, `PIDS=64`, `READONLY=true`, `PORTS={}`, `MOUNTS=0`. Running `php -r` inside the ephemeral container passed (`PHP_8.3`). The container was immediately removed; remaining containers using the selected PHP image: **zero**. Fleetbase app and database health checked **healthy** afterward. This is a bounded Docker security primitive proof, **not** an application upgrade or database restoration proof.
 
 **Next prerequisite before touching real data**: obtain a separate private isolated host, or design a dedicated disposable restore workflow on sufficiently provisioned compute with a reproducible pinned Laravel 12 runtime, documented backup-data boundary, explicit no-side-effects policy, resource quotas, schema and business-data checks, and paired full rollback. Do not infer a production **GO** from this successful container test. `S4_REAL_DATA_UPGRADE=NOT_RUN`, `S7_FULL_ROLLBACK=NOT_RUN`, `PRODUCTION=NO_GO`.
+
+
+## Encrypted backup metadata readiness preflight — 2026-11-10
+
+The new **read-only** `scripts/rc1-real-backup-metadata-preflight.sh` was executed on `mail01` without changing or exporting customer data. Syntax: PASS, exit code: 0.
+
+- `gstfleet-backup.service` and `gstfleet-offsite.service`: last result SUCCESS and both executions within 36 hours.
+- Existing private Restic repository: accessible and encrypted; local metadata enumerates **9 snapshots**, newest around **14 hours** old.
+- `RC1_BACKUP_METADATA_READINESS=PASS_RESTORE_STILL_REQUIRED`.
+- **Not established by this preflight:** remote B2 snapshot content verification, restoreability of all three databases, data consistency after the Laravel 12 migration, application restart under Laravel 10, full-stack rollback or staging isolation. These remain **NO-GO** release requirements.
+
+Never turn a metadata check or successful backup timer into production approval. Never send genuine backup data to public CI runners.
