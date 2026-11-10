@@ -46,11 +46,11 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM HUP
 
-echo "RC1_RESTORE_LAB_START=NETWORK_NONE_MEMORY_1G_TMPFS_512M"
+echo "RC1_RESTORE_LAB_START=NETWORK_NONE_MEMORY_1536M_TMPFS_768M"
 docker run -d --rm --name "$container" --network none \
-  --memory 1g --memory-swap 1g --cpus 1 --pids-limit 128 \
+  --memory 1536m --memory-swap 1536m --cpus 1 --pids-limit 128 \
   --security-opt no-new-privileges --read-only \
-  --tmpfs /var/lib/mysql:rw,nosuid,nodev,size=512m,mode=1777 \
+  --tmpfs /var/lib/mysql:rw,nosuid,nodev,size=768m,mode=1777 \
   --tmpfs /var/run/mysqld:rw,nosuid,nodev,size=32m,mode=1777 \
   --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 \
   --env MYSQL_ALLOW_EMPTY_PASSWORD=yes \
@@ -60,7 +60,7 @@ net=$(docker inspect "$container" --format '{{.HostConfig.NetworkMode}}')
 published=$(docker inspect "$container" --format '{{json .HostConfig.PortBindings}}')
 mem=$(docker inspect "$container" --format '{{.HostConfig.Memory}}')
 read_only=$(docker inspect "$container" --format '{{.HostConfig.ReadonlyRootfs}}')
-[[ "$net" == none && ( "$published" == "{}" || "$published" == null ) && "$mem" == 1073741824 && "$read_only" == true ]] || {
+[[ "$net" == none && ( "$published" == "{}" || "$published" == null ) && "$mem" == 1610612736 && "$read_only" == true ]] || {
   echo "RC1_RESTORE=NO_GO_ISOLATION_CONTRACT"; exit 2;
 }
 echo "RC1_RESTORE_ISOLATION=PASS"
