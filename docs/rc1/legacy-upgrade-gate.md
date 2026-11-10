@@ -381,3 +381,18 @@ The lab calls the genuine `Fleetbase\\Support\\Auth::setSession` with simple syn
 **Boundary:** The public API middleware `AuthenticateOnceWithBasicAuth` additionally resolves a bearer token to `ApiCredential` or Sanctum token, checks ownership/expiry and initializes session through `Auth::setSession`. Sanctum also has a separate UUID company check. **This diagnostic does not prove that a real bearer credential can authenticate without a company**, or that API request parameters can bypass middleware. Actual signed credentials, two identities, authorization directives, internal API vs public API, missing-company guard and cross-tenant authenticated HTTP 401/403/404 remain **NOT TESTED**. A candidate patch for five model methods exists on a separate Core API branch and is not installed in RC1 or production.
 
 **Decision:** `SESSION_PROVENANCE_SYNTHETIC=PASS`; `MISSING_COMPANY_ADMISSION=SECURITY_REVIEW_REQUIRED`; `AUTHENTICATED_HTTP_TENANCY=NOT_RUN`; `PRODUCTION=NO_GO`.
+
+
+## Candidate auth-session tenant UUID rejection — Laravel12 and Laravel10 PASS, real HTTP still NOT RUN (2026-11-10)
+
+The existing Core API security candidate branch `security/rc1-fail-closed-tenant-lookup-20261110` was extended at commit **`15b7437908252488b551cf4b0ef8d5c71ff54d81`**. The additional change to `src/Support/Auth.php` rejects missing/non-UUID tenant values **before writing `Auth::setSession`** for both regular user identities and `ApiCredential` objects. It uses the existing `Str::isUuid` helper. This is a **candidate only**, not integrated into RC1's pinned vendor dependency, Composer lock or production.
+
+The newly committed reproducible `scripts/rc1-api-auth-session-candidate-lab.sh` (commit `27b9cbba`) was executed with the patched Auth source mounted read-only over the two pinned Laravel12 and historical Laravel10 vendor trees, using containerized PHP 8.2 `--network none`, read-only code, array sessions and **only synthetic user-like objects and UUIDs**:
+
+- Identity A and identity B with valid synthetic UUID companies establish the expected user/company session: **PASS** on both L12 and L10.
+- Null company is rejected (`setSession() === false`) and does not modify the preceding session: **PASS** on both versions.
+- Malformed company UUID is likewise rejected before any session mutation: **PASS** on both versions.
+- `RC1_SESSION_L12=PASS_SYNTHETIC_IDENTITY`, `RC1_MISSING_COMPANY_SESSION_L12=REJECTED_PASS`, `RC1_MALFORMED_COMPANY_SESSION_L12=REJECTED_PASS` and the equivalent 3 L10 markers all PASS.
+- Script `bash -n=PASS`, Core API candidate `php -l=PASS`, full run **exit 0**. Temporary source file deleted. No real accounts/credentials, external network or production database accessed.
+
+**Strict limitations:** The test invokes the real Auth session method but **not the complete bearer-token middleware, an Eloquent User/ApiCredential authenticated through the database, or actual HTTP**. It therefore does not establish that a particular production bearer token can authenticate with a missing/invalid company, nor that the candidate is safe under actual multi-tenant traffic. A real two-company authenticated HTTP test with full authorization directives, tenant IDOR, API key and Sanctum flows and dedicated full-stack staging rollback remain **NOT RUN**. `PRODUCTION=NO_GO`, candidate NOT MERGED, PR #6 DRAFT.
