@@ -126,6 +126,17 @@ jobs:
           mysql -h 127.0.0.1 -uroot -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='gst_rc1_s4_upgrade' AND table_type='BASE TABLE'" | awk '{if ($1<100) exit 2; print "S4_LARAVEL10_TABLES="$1}'
           echo "S4_LARAVEL10_SYNTHETIC_SCHEMA=PASS"
 
+      - name: Snapshot the three historical synthetic databases before upgrade
+        run: |
+          set -euo pipefail
+          # The dump files contain only CI-created schema, no production records.
+          for suffix in '' _sandbox _storefront; do
+            db="gst_rc1_s4_upgrade${suffix}"
+            mysqldump -h 127.0.0.1 -uroot --single-transaction --quick --no-tablespaces --routines --events --triggers "$db" > "$RUNNER_TEMP/s7-old${suffix}.sql"
+            test -s "$RUNNER_TEMP/s7-old${suffix}.sql"
+            echo "S7_PRE_UPGRADE_SNAPSHOT=PASS:${db}"
+          done
+
       - name: Install Laravel 12 pinned candidate and run strict security audit
         env:
           GH_JOB_TOKEN: ${{ github.token }}
@@ -156,6 +167,37 @@ jobs:
           php artisan migrate --force --no-interaction --no-ansi > "$RUNNER_TEMP/s4-l12-rerun.log" 2>&1
           grep -q 'Nothing to migrate' "$RUNNER_TEMP/s4-l12-rerun.log"
           echo "S4_LARAVEL12_UPGRADE_RERUN_NOOP=PASS"
+          # Restore the untouched pre-upgrade L10 snapshots to NEW schemas.
+          # Do not drop any upgraded database or run migrate:rollback:
+          # a live receipt ledger must never be silently erased.
+          mysql -h 127.0.0.1 -uroot <<'SQL'
+          CREATE DATABASE gst_rc1_s7_recovered CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+          CREATE DATABASE gst_rc1_s7_recovered_sandbox CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+          CREATE DATABASE gst_rc1_s7_recovered_storefront CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+          SQL
+          for suffix in '' _sandbox _storefront; do
+            db="gst_rc1_s7_recovered${suffix}"
+            mysql -h 127.0.0.1 -uroot "$db" < "$RUNNER_TEMP/s7-old${suffix}.sql"
+            expected=$(mysql -h 127.0.0.1 -uroot -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='gst_rc1_s4_upgrade${suffix}' AND table_type='BASE TABLE'")
+            restored=$(mysql -h 127.0.0.1 -uroot -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$db' AND table_type='BASE TABLE'")
+            test "$restored" -ge 30
+            # The only expected additional table after the RC1 upgrade in
+            # the primary DB is the new receipt ledger. Confirm the recovered
+            # baseline matches the old baseline counts independently.
+            if [ -z "$suffix" ]; then
+              test "$restored" -eq 152
+              test "$expected" -eq 153
+            elif [ "$suffix" = _sandbox ]; then
+              test "$restored" -eq 138
+            else
+              test "$restored" -eq 33
+            fi
+            echo "S7_RECOVERED_HISTORICAL_TABLES=PASS:${db}:${restored}"
+          done
+          mysql -h 127.0.0.1 -uroot -N -B gst_rc1_s7_recovered -e "SELECT COUNT(*) FROM migrations" | grep -qx 394
+          mysql -h 127.0.0.1 -uroot -N -B gst_rc1_s7_recovered -e "SELECT COUNT(*) FROM migrations WHERE migration='2026_11_08_000001_create_telematic_webhook_receipts_table'" | grep -qx 0
+          mysql -h 127.0.0.1 -uroot -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='gst_rc1_s7_recovered' AND table_name='telematic_webhook_receipts'" | grep -qx 0
+          echo "S7_LARAVEL10_THREE_SCHEMA_RESTORE=PASS"
           echo "S4_REAL_PRODUCTION_SNAPSHOT_UPGRADE=NOT_TESTED"
           echo "S7_REAL_ROLLBACK=NOT_TESTED"
           echo "PRODUCTION_DECISION=NO_GO"
