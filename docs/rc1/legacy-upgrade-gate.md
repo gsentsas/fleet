@@ -60,3 +60,15 @@ The server's free disk increased considerably since the prior observation (~50 G
 **Feasible next research:** a deliberately constrained, private single-use restore/migration proof on dedicated compute or a proven isolated disposable environment with strict CPU/memory quotas, no public ports, no external side effects and independent old/new application artifacts. Such a proof still needs explicit full rollback and validated capacity. The presence of free disk alone is **not authorization** to run it on the shared production server.
 
 **Current production decision: NO-GO.**
+
+
+## S4-LAB-0: ephemeral Docker isolation proof on mail01 — 2026-11-10
+
+**PASS for container guardrails only, NOT a production-data Laravel upgrade.** After clearing two definitively suspended old development processes, the server had approximately 6.0 GiB `MemAvailable`, no recent memory PSI pressure, 228 GiB disk free, and eight healthy/running GST Fleetbase production services.
+
+A single **already locally available** `php:8.3-fpm-alpine` container was launched with the following deliberately conservative options:
+`--network none --memory 128m --memory-swap 128m --cpus 0.50 --pids-limit 64 --read-only --cap-drop ALL --security-opt no-new-privileges:true --tmpfs /tmp:rw,noexec,nosuid,size=8m`. No bind mount, secret, backup, external network, published port, database access, Docker image build/pull, or project worktree access.
+
+Docker `inspect` proved: `NETWORK=none`, `MEM_BYTES=134217728`, `MEM_SWAP=134217728`, `NANO_CPUS=500000000`, `PIDS=64`, `READONLY=true`, `PORTS={}`, `MOUNTS=0`. Running `php -r` inside the ephemeral container passed (`PHP_8.3`). The container was immediately removed; remaining containers using the selected PHP image: **zero**. Fleetbase app and database health checked **healthy** afterward. This is a bounded Docker security primitive proof, **not** an application upgrade or database restoration proof.
+
+**Next prerequisite before touching real data**: obtain a separate private isolated host, or design a dedicated disposable restore workflow on sufficiently provisioned compute with a reproducible pinned Laravel 12 runtime, documented backup-data boundary, explicit no-side-effects policy, resource quotas, schema and business-data checks, and paired full rollback. Do not infer a production **GO** from this successful container test. `S4_REAL_DATA_UPGRADE=NOT_RUN`, `S7_FULL_ROLLBACK=NOT_RUN`, `PRODUCTION=NO_GO`.
