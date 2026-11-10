@@ -18,15 +18,26 @@ $capsule->schema()->create('orders',function($table){
     $table->increments('id');
     $table->string('company_uuid');
     $table->string('reference');
+    $table->string('public_id');
 });
+config(['api.cache.enabled'=>false]);
+$app->instance('db',$capsule->getDatabaseManager());
+Illuminate\Support\Facades\DB::clearResolvedInstance('db');
+Illuminate\Support\Facades\Schema::clearResolvedInstance('db');
+class Rc1LookupOrder extends Illuminate\Database\Eloquent\Model {
+    use Fleetbase\Traits\HasApiModelBehavior;
+    protected $table='orders';
+    protected $fillable=['company_uuid','public_id','reference'];
+    public $timestamps=false;
+}
 class Rc1Order extends Illuminate\Database\Eloquent\Model {
     protected $table='orders';
     protected $guarded=[];
     public $timestamps=false;
 }
 Rc1Order::insert([
- ['company_uuid'=>'rc1-company-a','reference'=>'rc1-order-a'],
- ['company_uuid'=>'rc1-company-b','reference'=>'rc1-order-b'],
+ ['company_uuid'=>'rc1-company-a','reference'=>'rc1-order-a','public_id'=>'rc1-order-a'],
+ ['company_uuid'=>'rc1-company-b','reference'=>'rc1-order-b','public_id'=>'rc1-order-b'],
 ]);
 foreach (['rc1-company-a'=>'rc1-order-a','rc1-company-b'=>'rc1-order-b'] as $company=>$expected) {
     $request=Illuminate\Http\Request::create('/v1/orders','GET',[
@@ -44,8 +55,17 @@ foreach (['rc1-company-a'=>'rc1-order-a','rc1-company-b'=>'rc1-order-b'] as $com
     $filter->queryForPublic();
     $rows=$builder->pluck('reference')->all();
     if ($rows!==[$expected]) { echo "NO_GO\n";exit(2); }
+    $actual=Rc1LookupOrder::findRecordOrFail($expected);
+    if ($actual->public_id!==$expected) { echo "NO_GO_LOOKUP_OWN\n";exit(2); }
+    $other=$expected==='rc1-order-a'?'rc1-order-b':'rc1-order-a';
+    try {
+        Rc1LookupOrder::findRecordOrFail($other);
+        echo "NO_GO_CROSS_COMPANY_LOOKUP\n";exit(2);
+    } catch (Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+        // Expected denial: company UUID constraint on the real Fleetbase trait.
+    }
 }
-echo "PASS_TWO_COMPANIES\n";
+echo "PASS_TWO_COMPANIES_AND_IDOR_LOOKUPS\n";
 PHP
 chmod 400 "$probe"
 for version in L12 L10; do
@@ -68,10 +88,10 @@ for version in L12 L10; do
       fleetbase/fleetbase-api:v0.7.75 /tmp/rc1-tenants.php 2>/dev/null) || {
         echo "RC1_TENANCY_$version=NO_GO_RUNTIME"; exit 2;
       }
-    [[ "$result" == PASS_TWO_COMPANIES ]] || {
+    [[ "$result" == PASS_TWO_COMPANIES_AND_IDOR_LOOKUPS ]] || {
       echo "RC1_TENANCY_$version=NO_GO_ASSERTION"; exit 2;
     }
-    echo "RC1_TENANCY_$version=PASS_FILTER_ONLY"
+    echo "RC1_TENANCY_$version=PASS_FILTER_AND_DIRECT_LOOKUP"
 done
 echo RC1_AUTHENTICATED_HTTP_TENANCY=NOT_TESTED
 echo RC1_PRODUCTION=NO_GO
