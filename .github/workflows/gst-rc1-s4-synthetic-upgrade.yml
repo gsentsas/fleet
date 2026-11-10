@@ -16,7 +16,7 @@ permissions:
 jobs:
   synthetic-legacy-delta:
     name: Verify pending receipt migration on synthetic existing DB
-    if: github.event_name == 'pull_request' && github.head_ref == 'release/rc1-laravel12-consolidation-20261110'
+    if: github.event_name == 'pull_request' && github.head_ref == 'release/rc1-security-core-e2076d39-20261110'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
@@ -70,8 +70,8 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
-          printf '%s  %s\n' 'be721c73404b686992d5971abe712ab2c373bd0e4ecc58bfb2d0a2021be5297c' composer.json | sha256sum --check --status
-          printf '%s  %s\n' 'b73196821fe46d45eb8f4f9e2bd6b0df90a2e62d911b8f840c7fc243c94ba453' composer.lock | sha256sum --check --status
+          printf '%s  %s\n' '3b9d892e5b94e0b42b352fa006c2ea63e551d6ab8a8e6c7c668caed3c32e4c9c' composer.json | sha256sum --check --status
+          printf '%s  %s\n' '3d3ae9cfb74c7b8015f83de1d01a65b950109b2815dd566b4b5d4297cc0550bd' composer.lock | sha256sum --check --status
           test -s database/migrations/2019_12_14_000001_create_personal_access_tokens_table.php
           test "$DB_HOST" = 127.0.0.1
           test "$DB_DATABASE" = gst_rc1_s4_synthetic

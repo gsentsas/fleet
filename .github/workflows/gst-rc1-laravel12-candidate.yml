@@ -56,10 +56,10 @@ jobs:
       - name: Validate committed Laravel12 manifest and lock SHA before tests
         run: |
           set -euo pipefail
-          test "$GITHUB_HEAD_REF" = "release/rc1-laravel12-consolidation-20261110"
+          test "$GITHUB_HEAD_REF" = "release/rc1-security-core-e2076d39-20261110"
           test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
-          printf '%s  %s\n' 'be721c73404b686992d5971abe712ab2c373bd0e4ecc58bfb2d0a2021be5297c' 'composer.json' | sha256sum --check --status
-          printf '%s  %s\n' 'b73196821fe46d45eb8f4f9e2bd6b0df90a2e62d911b8f840c7fc243c94ba453' 'composer.lock' | sha256sum --check --status
+          printf '%s  %s\n' '3b9d892e5b94e0b42b352fa006c2ea63e551d6ab8a8e6c7c668caed3c32e4c9c' 'composer.json' | sha256sum --check --status
+          printf '%s  %s\n' '3d3ae9cfb74c7b8015f83de1d01a65b950109b2815dd566b4b5d4297cc0550bd' 'composer.lock' | sha256sum --check --status
           python3 - <<'PY'
           import json
           from pathlib import Path
@@ -92,7 +92,7 @@ jobs:
               exit 2
             fi
           done <<'REVISIONS'
-          gsentsas/core-api f81cf74e38f9c11d03d0da6d6bdc9a489c7a52dd
+          gsentsas/core-api e2076d396af95dbe77823f670cd50d4f12671e0c
           gsentsas/storefront b6d596154370ed5770225d889363a74fab56e584
           gsentsas/fleetops 665e4fdf16f0344a24a273ebd1599b92ba6c2728
           geocoder-php/GeocoderLaravel 13.2.2
@@ -122,7 +122,7 @@ jobs:
         id: solve
         run: |
           set -euo pipefail
-          printf '%s  %s\n' 'b73196821fe46d45eb8f4f9e2bd6b0df90a2e62d911b8f840c7fc243c94ba453' 'composer.lock' | sha256sum --check --status
+          printf '%s  %s\n' '3d3ae9cfb74c7b8015f83de1d01a65b950109b2815dd566b4b5d4297cc0550bd' 'composer.lock' | sha256sum --check --status
           echo "RC1_COMPOSER_UPDATE=NOT_RUN"
           echo "RC1_LOCK_SOURCE=COMMITTED_BRANCH"
       - name: Check exact fork commit refs and strict audit on candidate
@@ -137,7 +137,7 @@ jobs:
           lock=json.loads(Path("composer.lock").read_text())
           packages={p["name"]:p for p in lock.get("packages",[])}
           pins={
-              "fleetbase/core-api":("https://github.com/gsentsas/core-api.git","f81cf74e38f9c11d03d0da6d6bdc9a489c7a52dd"),
+              "fleetbase/core-api":("https://github.com/gsentsas/core-api.git","e2076d396af95dbe77823f670cd50d4f12671e0c"),
               "fleetbase/storefront-api":("https://github.com/gsentsas/storefront.git","b6d596154370ed5770225d889363a74fab56e584"),
               "fleetbase/fleetops-api":("https://github.com/gsentsas/fleetops.git","665e4fdf16f0344a24a273ebd1599b92ba6c2728"),
           }
@@ -175,8 +175,8 @@ jobs:
       - name: Confirm committed Composer files unchanged after install
         run: |
           set -euo pipefail
-          printf '%s  %s\n' 'be721c73404b686992d5971abe712ab2c373bd0e4ecc58bfb2d0a2021be5297c' 'composer.json' | sha256sum --check --status
-          printf '%s  %s\n' 'b73196821fe46d45eb8f4f9e2bd6b0df90a2e62d911b8f840c7fc243c94ba453' 'composer.lock' | sha256sum --check --status
+          printf '%s  %s\n' '3b9d892e5b94e0b42b352fa006c2ea63e551d6ab8a8e6c7c668caed3c32e4c9c' 'composer.json' | sha256sum --check --status
+          printf '%s  %s\n' '3d3ae9cfb74c7b8015f83de1d01a65b950109b2815dd566b4b5d4297cc0550bd' 'composer.lock' | sha256sum --check --status
           test -z "$(git status --porcelain -- composer.json composer.lock)"
           echo "RC1_POST_INSTALL_COMMITTED_LOCK_UNCHANGED=PASS"
 
@@ -647,8 +647,8 @@ jobs:
       - name: Audit committed lock full and runtime, abandoned fail
         run: |
           set -euo pipefail
-          printf '%s  %s\n' 'be721c73404b686992d5971abe712ab2c373bd0e4ecc58bfb2d0a2021be5297c' 'composer.json' | sha256sum --check --status
-          printf '%s  %s\n' 'b73196821fe46d45eb8f4f9e2bd6b0df90a2e62d911b8f840c7fc243c94ba453' 'composer.lock' | sha256sum --check --status
+          printf '%s  %s\n' '3b9d892e5b94e0b42b352fa006c2ea63e551d6ab8a8e6c7c668caed3c32e4c9c' 'composer.json' | sha256sum --check --status
+          printf '%s  %s\n' '3d3ae9cfb74c7b8015f83de1d01a65b950109b2815dd566b4b5d4297cc0550bd' 'composer.lock' | sha256sum --check --status
           composer validate --no-check-publish
           composer audit --locked --abandoned=fail --format=plain
           composer audit --locked --no-dev --abandoned=fail --format=plain

@@ -10,11 +10,11 @@
     "core_api": {
       "package": "fleetbase/core-api",
       "repository": "gsentsas/core-api",
-      "branch": "compat/rc1-laravel12-core-regressions",
-      "commit": "f81cf74e38f9c11d03d0da6d6bdc9a489c7a52dd",
-      "parent_tested_commit": "1b24680edf48eee7fd5988aac89f20b9f965eaa8",
-      "draft_pr": "https://github.com/gsentsas/core-api/pull/2",
-      "status": "CHANGED_NEW_SHA_TESTS_REQUIRED"
+      "branch": "security/rc1-fail-closed-tenant-lookup-20261110",
+      "commit": "e2076d396af95dbe77823f670cd50d4f12671e0c",
+      "parent_tested_commit": "f81cf74e38f9c11d03d0da6d6bdc9a489c7a52dd",
+      "draft_pr": "https://github.com/gsentsas/core-api/pull/3",
+      "status": "NEW_CORE_SHA_SECURITY_REGRESSION_CI_REQUIRED"
     },
     "fleetops": {
       "package": "fleetbase/fleetops-api",
