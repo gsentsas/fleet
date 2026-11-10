@@ -26,4 +26,21 @@
 
 Missing image digest or migration plan; insufficient disk/RAM; any production endpoint/mount/secret; unsafe outbound traffic; unknown historical migrations; failed restoration, schema/data checks or rollback.
 
-**Current decision:** `S2_RESTORE=PASS`, `S3_THREE_FORK_MIGRATION_MAPPING=PASS_WITH_ONE_PENDING`, `S4_LEGACY_UPGRADE=NOT_RUN`, `S7_ROLLBACK=NOT_RUN`, `PRODUCTION=NO_GO`.
+## Consolidated evidence — 2026-11-10
+
+- **S2 real backup SQL recovery:** encrypted Restic snapshot `860ef168` re-imported into an isolated ephemeral MySQL 8 container on mail01; 152 main + 138 sandbox + 33 Storefront base tables. No production mount, network or published port. Import test ended with ephemeral container removed and active DB container unchanged.
+- **S3 package-to-registry reconciliation:** Core 123/123, FleetOps 172/173 (pending receipt migration), Storefront 55/55 recorded in main. Audit only covers these pinned three forks; other packages may have migrations.
+- **S4 synthetic historical schema upgrade:** [run 42850611453](https://github.com/gsentsas/fleet/actions/runs/42850611453) SUCCESS, pinned Laravel 10 baseline (394 main migrations / 152 main tables / 138 sandbox tables) followed by pinned Laravel 12 migration on the **same three entirely synthetic MySQL databases**, followed by idempotent rerun. Main and sandbox each gained one telematics receipt table.
+- **S7 synthetic SQL recovery:** [run 42850611453](https://github.com/gsentsas/fleet/actions/runs/42850611453) SUCCESS. After adding one disposable integrity-fixture table and row to each DB, pre-upgrade base table counts 153/139/34; after upgrade 154/140/34; recovered original snapshots 153/139/34. Fixture rows, schema metadata SHA-256 fingerprints (tables/columns/indexes/FKs), and migration registry recovery verified 3/3.
+- **Other CI on same head:** API, Console, Install Smoke and committed Composer security audit all SUCCESS. The RC1 diagnostic workflow retains a deliberately failing publication-prevention final step.
+- **Operational read-only host gate:** mail01 hosts multiple services, ~49 GiB free at 94% filesystem utilization, ~5.0 GiB available RAM, zero swap; Mac ~11 GiB free, Docker Desktop ~8.3 GB RAM. Do not build a second full Fleetbase stack on either host without capacity qualification. All eight production `gstfleet` containers remain running, backup and offsite unit results SUCCESS, no `gst-rc1*` containers remaining.
+
+## Outstanding irreversible production gates
+
+1. Provision or identify **dedicated private staging compute** with demonstrably adequate reserved disk/RAM and separately pinned container images. The current shared mail01 and low-free-space Mac have **not** passed this gate.
+2. Restore the encrypted production snapshot **only inside the private staging trust boundary**. Keep credentials, tenant data and backups off public GitHub-hosted runners. Ensure app workers/webhooks/schedulers/email/SMS/payments and external network side effects are disabled.
+3. Execute the exact RC1 Laravel 12 API against the **restored existing-data databases**. Compare row cardinality and key integrity for sensitive business tables without logging their contents; prove the receipt migration, no pending migrations, no-op second pass, IAM/IDOR and transport workflows.
+4. Run a **complete application and database rollback rehearsal** in that isolated environment, including pinned old runtime and three DB recoveries. Verify no webhook replay, no data loss, and demonstrate restart/health.
+5. Obtain an explicit production change gate before any merge, deployment, database migration or switch of real traffic.
+
+**Current decision:** `S2_REAL_SQL_RESTORE=PASS`, `S3_THREE_FORK_MAPPING=PASS_WITH_ONE_PENDING`, `S4_SYNTHETIC_UPGRADE=PASS`, `S7_SYNTHETIC_SQL_RECOVERY=PASS`, `S4_REAL_DATA_UPGRADE=NOT_RUN`, `S7_FULL_APP_ROLLBACK=NOT_RUN`, `PRODUCTION=NO_GO`.
