@@ -275,6 +275,20 @@ http_health_probe() {
     fi
     sleep 1
   done
+  # Probe ONLY GET endpoints; do not send credentials or touch write routes.
+  # Status 401/403 means access denied. 503/500 is an application/config error,
+  # NOT an authentication success; keep the separate full-stack gate NO_GO.
+  local authenticated_routes_ok=1 path http_code
+  for path in v1/orders v1/drivers v1/vehicles int/v1/orders int/v1/users; do
+    http_code=$(docker exec "$http_name" curl --silent --output /dev/null --write-out '%{http_code}' --max-time 7 -H 'Accept: application/json' "http://127.0.0.1:18770/$path" 2>/dev/null || echo ERROR)
+    echo "RC1_${phase}_PROTECTED_GET_${path//\//_}=$http_code"
+    [[ "$http_code" == 401 || "$http_code" == 403 ]] || authenticated_routes_ok=0
+  done
+  if [[ "$authenticated_routes_ok" == 1 ]]; then
+    echo "RC1_${phase}_UNAUTHENTICATED_ROUTE_DENIAL=PASS"
+  else
+    echo "RC1_${phase}_UNAUTHENTICATED_ROUTE_DENIAL=NO_GO_NEEDS_FULL_STACK_DIAGNOSIS"
+  fi
   docker rm -f "$http_name" >/dev/null 2>&1 || true
   echo "RC1_${phase}_HTTP_HEALTH_STATUS=${status:-UNRESPONSIVE}"
   [[ "$success" == 1 ]] || { echo "RC1_${phase}_HTTP_HEALTH=NO_GO"; return 2; }
