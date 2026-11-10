@@ -92,11 +92,17 @@ print(hits[0])
   docker exec "$container" mysql --protocol=socket -uroot -e "CREATE DATABASE \`$name\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" >/dev/null 2>&1
   echo "RC1_RESTORE_IMPORT_START=$name"
   # Suppress SQL/record-level diagnostic output; fail closed on errors.
+  error_log=$(mktemp /dev/shm/gst-rc1-import-error.XXXXXXXX)
   if ! restic --no-lock dump "$snapshot" "$path" | gzip -dc | \
-    docker exec -i "$container" mysql --protocol=socket -uroot "$name" >/dev/null 2>/dev/null; then
+    docker exec -i "$container" mysql --protocol=socket -uroot "$name" >/dev/null 2>"$error_log"; then
+    # Emit only the machine-readable MySQL error code, never SQL text.
+    mysql_code=$(grep -m 1 -Eo 'ERROR [0-9]+' "$error_log" || true)
     echo "RC1_RESTORE_IMPORT_$name=NO_GO"
+    echo "RC1_RESTORE_MYSQL_ERROR_CODE=${mysql_code:-UNCLASSIFIED}"
+    rm -f "$error_log"
     exit 2
   fi
+  rm -f "$error_log"
   tables=$(docker exec "$container" mysql --protocol=socket -uroot -N -B -e \
     "SELECT COUNT(*) FROM information_schema.tables WHERE TABLE_SCHEMA='$name' AND TABLE_TYPE='BASE TABLE';")
   [[ "$tables" == "$expected" ]] || { echo "RC1_RESTORE_TABLE_COUNT_$name=NO_GO"; exit 2; }
