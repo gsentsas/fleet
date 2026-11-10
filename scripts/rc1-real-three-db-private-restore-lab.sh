@@ -99,6 +99,8 @@ print(hits[0])
     mysql_code=$(grep -m 1 -Eo 'ERROR [0-9]+' "$error_log" || true)
     echo "RC1_RESTORE_IMPORT_$name=NO_GO"
     echo "RC1_RESTORE_MYSQL_ERROR_CODE=${mysql_code:-UNCLASSIFIED}"
+    echo "RC1_RESTORE_CONTAINER_STATE=$(docker inspect "$container" --format 'running={{.State.Running}} oom={{.State.OOMKilled}} exit={{.State.ExitCode}}' 2>/dev/null || echo missing)"
+    docker stats --no-stream --format 'RC1_RESTORE_MEMORY_AT_FAILURE={{.MemUsage}}' "$container" 2>/dev/null || true
     rm -f "$error_log"
     exit 2
   fi
