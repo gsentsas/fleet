@@ -229,12 +229,12 @@ echo RC1_SANCTUM_FOUR_PROFILE_IAM=PASS
 # must still reject a no-role user. We remove only a synthetic test catalog
 # entry in the ephemeral restored DB, after the four-profile baseline passes.
 before_count=$(docker exec "$name" mysql -uroot --protocol=socket -N -B -e "SELECT COUNT(*) FROM fleetbase.permissions WHERE name='fleet-ops view order';")
-[[ "$before_count" == 1 ]] || {echo RC1_MISSING_PERMISSION_PREFLIGHT=NO_GO;exit 2;}
+[[ "$before_count" == 1 ]] || { echo RC1_MISSING_PERMISSION_PREFLIGHT=NO_GO;exit 2;}
 wildcard_count=$(docker exec "$name" mysql -uroot --protocol=socket -N -B -e "SELECT COUNT(*) FROM fleetbase.permissions WHERE name IN ('fleet-ops * order','fleet-ops *');")
 echo "RC1_MISSING_PERMISSION_WILDCARDS=$wildcard_count"
 docker exec "$name" mysql -uroot --protocol=socket -e "DELETE FROM fleetbase.permissions WHERE name='fleet-ops view order';" >/dev/null
 after_count=$(docker exec "$name" mysql -uroot --protocol=socket -N -B -e "SELECT COUNT(*) FROM fleetbase.permissions WHERE name='fleet-ops view order';")
-[[ "$after_count" == 0 ]] || {echo RC1_MISSING_PERMISSION_REMOVAL=NO_GO;exit 2;}
+[[ "$after_count" == 0 ]] || { echo RC1_MISSING_PERMISSION_REMOVAL=NO_GO;exit 2;}
 no_role_after=$(status "$no_role_minted" 'int/v1/orders/rc1-test-order-a')
 echo "RC1_MISSING_PERMISSION_NO_ROLE_GET_HTTP=$no_role_after"
 if [[ "$no_role_after" == 200 ]];then
