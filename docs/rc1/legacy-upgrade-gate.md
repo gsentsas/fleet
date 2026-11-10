@@ -430,3 +430,20 @@ The script was revised to assess order IDOR independently from the organization 
 Anonymous GET of an order is **401**; health GET is **200**. Real Fleetbase HTTP middleware, bearer API credential resolution, session company context, controller and authorization flow were exercised (no mocked directives in this HTTP run). The **two-way authenticated HTTP order READ IDOR gate is now PASS on the candidate**. The earlier one-off B→A HTTP 500 was not reproduced in the final complete lab and had been classified NO-GO until this successful final run. Both legitimate own-order reads succeed and cross-company reads return 404.
 
 **Limits and decision:** This is **only GET** on two synthetic orders and with the isolated *candidate* code; it does not cover API authenticated PATCH/PUT/DELETE, permission-role matrices, Sanctum tokens, other resources, tenancy in asynchronous jobs, performance or simultaneous full-stack staging upgrade/rollback. Do not merge the candidate or RC1 solely on this evidence. All temporary PHP, MySQL and Redis containers and candidate files were cleaned up, production services unchanged. **`AUTHENTICATED_TWO_WAY_HTTP_ORDER_READ_IDOR=PASS_CANDIDATE`; `PRODUCTION=NO_GO`.**
+
+
+## Real two-bearer cross-company HTTP PUT/DELETE denied and SQL unchanged — PASS (2026-11-10)
+
+The committed `scripts/rc1-two-bearer-http-write-idempotence-lab.sh` (SHA of introducing commit `c01d45e4ab1d34b10c8933f8948b28b2c8d20831`) extends the previously validated isolated, real HTTP two-bearer test with **actual foreign-company PUT and DELETE** operations. The exact pinned Laravel12 runtime uses restored `gstfleet-daily` MySQL 8 (152 tables), private Redis 7.4 and the two synthetic user/company/credential/order pairs, all in disposable Docker `--network none` containers with no host ports, ephemeral MySQL files, read-only application and candidate Core API sources. The test enforces the host available-memory guard before allocating the lab.
+
+For both bearer A and bearer B:
+- `GET /v1/organizations/current` → HTTP **200**.
+- `GET /v1/orders/{own synthetic order}` → HTTP **200**.
+- `GET /v1/orders/{other-company synthetic order}` → HTTP **404**.
+- `PUT /v1/orders/{other-company synthetic order}` with synthetic note → HTTP **404**.
+- `DELETE /v1/orders/{other-company synthetic order}` → HTTP **404**.
+- After both prohibited writes, query directly in **disposable MySQL** confirms **both synthetic rows remain present, undeleted, original status, and original null notes**, `RC1_SIDE_a=PASS_FOREIGN_PUT_DELETE_NO_DB_EFFECT`, `RC1_SIDE_b=PASS_FOREIGN_PUT_DELETE_NO_DB_EFFECT`.
+
+Anonymous GET order 401, health 200. Markers `RC1_REAL_TWO_BEARER_HTTP_ORDER_IDOR=PASS` and `RC1_REAL_TWO_BEARER_HTTP_FOREIGN_PUT_DELETE=PASS`; test `bash -n=PASS` and final **exit 0**. Only HTTP codes and synthetic invariants are logged; no customer rows, tokens or response bodies printed. All ephemeral containers and temporary candidate files cleaned.
+
+**Scope:** This is real two-company, bearer API key HTTP cross-tenant **read, PUT, DELETE denial** with a preserved database, on the **unmerged candidate patch**, not on the deployed code. Positive own-company PUT/DELETE, role/permission matrices, Sanctum flows, absent-company HTTP route tests, other model types, complete multiservice staging and rollback remain NOT TESTED. **Do not merge/tag/deploy** on this result alone; PR #6 DRAFT, production NO-GO.
