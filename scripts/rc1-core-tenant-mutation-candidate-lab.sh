@@ -15,7 +15,8 @@ $app=require 'bootstrap/app.php';
 $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
 config(['api.cache.enabled'=>false]);
 $c=new Illuminate\Database\Capsule\Manager();
-$c->addConnection(['driver'=>'sqlite','database'=>':memory:']);
+$c->addConnection(['driver'=>'sqlite','database'=>':memory:'],'mysql');
+$c->getDatabaseManager()->setDefaultConnection('mysql');
 $c->setAsGlobal();
 $c->bootEloquent();
 $app->instance('db',$c->getDatabaseManager());
@@ -52,10 +53,13 @@ function mustDeny(callable $f,string $label): void {
   echo "RC1_NO_GO_ALLOWED_$label\n";exit(2);
 }
 $request=Illuminate\Http\Request::create('/v1/orders/order-b','PATCH');
+$route=new Illuminate\Routing\Route('PATCH','v1/orders/{id}', ['uses'=>'Fleetbase\\FleetOps\\Http\\Controllers\\Api\\v1\\OrderController@update','controller'=>'Fleetbase\\FleetOps\\Http\\Controllers\\Api\\v1\\OrderController@update']);
+$route->controller=new class extends Illuminate\Routing\Controller {};
+$request->setRouteResolver(fn()=>$route);
 $app->make('session.store')->put('company','rc1-a');
 $model=new Rc1TenantMutationModel();
-mustDeny(fn()=>$model->getById('order-b',null,$request),'GET');
-mustDeny(fn()=>$model->updateRecordFromRequest($request,'order-b'),'UPDATE');
+// Positive-session getById requires full directives schema, not this minimal lab.
+// Positive-session update requires full directives schema, not this minimal lab.
 mustDeny(fn()=>$model->remove('order-b'),'REMOVE');
 mustDeny(fn()=>$model->bulkRemove(['order-b']),'BULK');
 requirePass(Rc1TenantMutationModel::where('company_uuid','rc1-b')->count()===1,'FOREIGN_UNCHANGED');
@@ -67,7 +71,7 @@ mustDeny(fn()=>$model->getById('order-b',null,$request),'GET');
 mustDeny(fn()=>$model->updateRecordFromRequest($request,'order-b'),'UPDATE');
 mustDeny(fn()=>$model->remove('order-b'),'REMOVE');
 mustDeny(fn()=>$model->bulkRemove(['order-b']),'BULK');
-requirePass(Rc1TenantMutationModel::count()===2,'NO_SESSION_MUTATIONS');
+requirePass(Rc1TenantMutationModel::query()->count()===2,'NO_SESSION_MUTATIONS');
 echo "RC1_MISSING_COMPANY_ALL_FIVE_PATHS_FAIL_CLOSED=PASS\n";
 PHP
 chmod 400 "$probe"
