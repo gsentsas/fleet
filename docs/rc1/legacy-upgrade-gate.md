@@ -351,3 +351,18 @@ A reproducible synthetic regression script `scripts/rc1-core-tenant-mutation-can
 - Temporary candidate source/test files were removed; no running test containers remain, live API/DB still healthy.
 
 **Security gating:** This is a successful **synthetic ORM-level five-path candidate test**, not a real authenticated HTTP two-user IDOR test. The possible risk of bypass through a CLI-context runtime, other lookup methods and actual API session-setting behavior remains to audit. **Candidate NOT MERGED, PR #6 DRAFT, PRODUCTION NO-GO**. Dedicated full-stack staging upgrade/rollback remains required.
+
+
+## Positive-session Core API read/update + cross-company denial candidate regression — 2026-11-10
+
+Updated executable test `scripts/rc1-core-tenant-mutation-candidate-lab.sh` on RC1 branch, final test harness commit `c6495a2e`. It runs the **same candidate source** from fork branch `security/rc1-fail-closed-tenant-lookup-20261110` (Core API candidate SHA `af969abec0d2a77b319de9da6c0ebbeca3d2c843`) read-only over the installed pinned vendor dependency. PHP 8.2 Laravel12 and historical Laravel10 processes use `--network none`, SQLite in memory, two synthetic companies/orders, and `APP_RUNNING_IN_CONSOLE=false`.
+
+The fixture now includes `HasSessionAttributes` and **stubs only `applyDirectivesToQuery`** to bypass the separate authorization-directives database (not included in this minimal fixture). Real `getById`, `updateRecordFromRequest`, `findRecordOrFail`, `remove`, `bulkRemove` methods and their company scopes otherwise run.
+
+- Company A can **read and update its own fictional order**; the updated value is verified.
+- Company A cannot read/update/delete company B's order; company B's original value is verified unchanged.
+- A missing company causes all five direct-lookup/mutation paths to reject, with both rows unchanged.
+- Final source-backed script syntax and execution: `RC1_L12_MUTATION_AND_FAIL_CLOSED=PASS`, `RC1_L10_MUTATION_AND_FAIL_CLOSED=PASS`, **exit 0**.
+- Earlier candidate runs without the full fixture produced test-harness errors (route/controller resolver, missing directives relation, missing `HasSessionAttributes::isSessionAgnosticColumn`). These were **not** marked as PASS; the fixture is now corrected and fully rerun. No production changes; test artifacts cleaned up.
+
+**Strict scope:** This is an ORM/service regression of the candidate only. It does not validate actual API-minted credentials, authorization directives, real HTTP response codes or company-switch logic; those remain `NOT_TESTED`. The candidate remains **unmerged and unpinned**; no change to RC1 Composer dependency locks. Production remains **NO-GO**.
