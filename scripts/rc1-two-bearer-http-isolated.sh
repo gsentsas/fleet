@@ -8,9 +8,11 @@ export RESTIC_REPOSITORY=/root/gstfleet-secure-repository RESTIC_PASSWORD_FILE=/
 (( $(awk '/MemAvailable:/ {print $2}' /proc/meminfo) > 5242880 )) || { echo RC1_REAL_TWO_BEARER_HTTP=NO_GO_MEMORY_BELOW_5_GIB; exit 2; }
 [[ "$(docker image inspect mysql:8.0-oracle --format '{{.Id}}')" == sha256:6cd09145362dfe6831b14545de3d5fd6cc75c37cfd6ef8561429c1fc73518b39 ]] || exit 2
 [[ "$(docker image inspect fleetbase/fleetbase-api:v0.7.75 --format '{{.Id}}')" == sha256:413e497080156b692e089106c37555a1e33edabda1bb0b6f09c104b7a2c6171a ]] || exit 2
+[[ "$(docker image inspect redis:7.4-alpine --format '{{.Id}}')" == sha256:98c6ca8f397f86e469be752c3e7ed5eb8b17f2479840cb69a2e413037038e9f4 ]] || exit 2
 name="gst-rc1-http-auth-db-$$"
-web="gst-rc1-http-auth-web-$$"
-trap 'docker rm -f "$web" "$name" >/dev/null 2>&1 || true; echo RC1_AUTH_HTTP_CLEANUP=ATTEMPTED' EXIT
+web="gst-rc1-http-auth-web-$"
+redis="gst-rc1-http-auth-redis-$"
+trap 'docker rm -f "$web" "$redis" "$name" >/dev/null 2>&1 || true; echo RC1_AUTH_HTTP_CLEANUP=ATTEMPTED' EXIT
 docker run --rm -d --name "$name" --network none --memory 1536m --memory-swap 1536m --cpus 1 --pids-limit 128 --read-only --tmpfs /var/lib/mysql:rw,nosuid,nodev,size=768m,mode=1777 --tmpfs /var/run/mysqld:rw,nosuid,nodev,size=32m,mode=1777 --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 -e MYSQL_ALLOW_EMPTY_PASSWORD=yes mysql:8.0-oracle --bind-address=127.0.0.1 --skip-name-resolve >/dev/null
 [[ "$(docker inspect "$name" --format '{{.HostConfig.NetworkMode}} {{json .HostConfig.PortBindings}}')" == 'none {}' ]] || exit 2
 ready=0
@@ -45,8 +47,17 @@ INSERT INTO orders(uuid,public_id,company_uuid,created_by_uuid,status) VALUES
 SET FOREIGN_KEY_CHECKS=1;
 SQL
 echo RC1_AUTH_FIXTURES=PASS
+# Setting/branding and other Fleetbase resource paths call Redis directly.
+# Keep Redis local to the same networkless temporary MySQL namespace.
+docker run -d --rm --name "$redis" --network "container:$name" --memory 128m --memory-swap 128m --pids-limit 64 --read-only --security-opt no-new-privileges --tmpfs /tmp:rw,nosuid,nodev,size=8m --entrypoint redis-server redis:7.4-alpine --bind 127.0.0.1 --protected-mode yes --save '' --appendonly no >/dev/null
+for i in $(seq 1 15); do
+ if docker exec "$redis" redis-cli -h 127.0.0.1 ping 2>/dev/null | grep -qx PONG; then break; fi
+ sleep 1
+done
+docker exec "$redis" redis-cli -h 127.0.0.1 ping | grep -qx PONG || { echo RC1_AUTH_REDIS=NO_GO; exit 2; }
+echo RC1_AUTH_REDIS_EPHEMERAL=PASS
 app=/root/.gst-rc1-runtime-31a6a026/repo/api
-docker run --rm -d --name "$web" --network "container:$name" --memory 512m --memory-swap 512m --cpus 1 --pids-limit 96 --read-only --tmpfs /tmp:rw,nosuid,nodev,size=32m --tmpfs /fleetbase/api/storage:rw,nosuid,nodev,size=64m --tmpfs /fleetbase/api/bootstrap/cache:rw,nosuid,nodev,size=16m --mount "type=bind,source=$app,target=/fleetbase/api,readonly" --mount 'type=bind,source=/dev/shm/gst-rc1-core-fail-closed-candidate.php,target=/fleetbase/api/vendor/fleetbase/core-api/src/Traits/HasApiModelBehavior.php,readonly' --mount 'type=bind,source=/dev/shm/gst-rc1-auth-session-candidate.php,target=/fleetbase/api/vendor/fleetbase/core-api/src/Support/Auth.php,readonly' -w /fleetbase/api --entrypoint php -e APP_ENV=testing -e APP_DEBUG=false -e APP_KEY=base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= -e DB_CONNECTION=mysql -e DB_HOST=127.0.0.1 -e DB_DATABASE=fleetbase -e DB_USERNAME=root -e DB_PASSWORD= -e CACHE_DRIVER=array -e CACHE_STORE=array -e SESSION_DRIVER=array -e LOG_CHANNEL=stderr -e VIEW_COMPILED_PATH=/tmp -e QUEUE_CONNECTION=sync -e MAIL_MAILER=array fleetbase/fleetbase-api:v0.7.75 -S 127.0.0.1:18770 -t public public/index.php >/dev/null
+docker run --rm -d --name "$web" --network "container:$name" --memory 512m --memory-swap 512m --cpus 1 --pids-limit 96 --read-only --tmpfs /tmp:rw,nosuid,nodev,size=32m --tmpfs /fleetbase/api/storage:rw,nosuid,nodev,size=64m --tmpfs /fleetbase/api/bootstrap/cache:rw,nosuid,nodev,size=16m --mount "type=bind,source=$app,target=/fleetbase/api,readonly" --mount 'type=bind,source=/dev/shm/gst-rc1-core-fail-closed-candidate.php,target=/fleetbase/api/vendor/fleetbase/core-api/src/Traits/HasApiModelBehavior.php,readonly' --mount 'type=bind,source=/dev/shm/gst-rc1-auth-session-candidate.php,target=/fleetbase/api/vendor/fleetbase/core-api/src/Support/Auth.php,readonly' -w /fleetbase/api --entrypoint php -e APP_ENV=testing -e APP_DEBUG=false -e APP_KEY=base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= -e DB_CONNECTION=mysql -e DB_HOST=127.0.0.1 -e DB_DATABASE=fleetbase -e DB_USERNAME=root -e DB_PASSWORD= -e REDIS_HOST=127.0.0.1 -e REDIS_PORT=6379 -e REDIS_PASSWORD= -e CACHE_DRIVER=array -e CACHE_STORE=array -e SESSION_DRIVER=array -e LOG_CHANNEL=stderr -e VIEW_COMPILED_PATH=/tmp -e QUEUE_CONNECTION=sync -e MAIL_MAILER=array fleetbase/fleetbase-api:v0.7.75 -S 127.0.0.1:18770 -t public public/index.php >/dev/null
 for i in $(seq 1 20); do h=$(docker exec "$web" curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:18770/health 2>/dev/null || true);[[ "$h" == 200 ]] && break;sleep 1;done
 [[ "$h" == 200 ]] || exit 2
 echo RC1_AUTH_HEALTH=PASS
@@ -74,5 +85,5 @@ for side in a b; do
  fi
 done
 echo RC1_REAL_TWO_BEARER_HTTP_ORDER_IDOR=PASS
-echo RC1_ORGANIZATION_CURRENT_ROUTE=NEEDS_SEPARATE_FIXTURE_DIAGNOSIS
+echo RC1_ORGANIZATION_CURRENT_ROUTE=CHECK_HTTP_STATUSES_ABOVE
 echo RC1_PRODUCTION=NO_GO
