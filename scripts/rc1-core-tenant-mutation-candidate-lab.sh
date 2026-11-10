@@ -30,6 +30,7 @@ $c->schema()->create('orders',function ($t) {
 });
 class Rc1TenantMutationModel extends Illuminate\Database\Eloquent\Model {
   use Fleetbase\Traits\HasApiModelBehavior;
+  use Fleetbase\Traits\HasSessionAttributes;
   protected $table='orders';
   protected $fillable=['company_uuid','public_id','reference'];
   public $timestamps=false;
