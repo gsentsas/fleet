@@ -104,10 +104,38 @@ for side in a b; do
    echo "RC1_SIDE_$side=PASS_ORDER_IDOR_AND_ORG"
  fi
 done
+# Mint actual Sanctum tokens via Fleetbase User::createToken(), not hand-built
+# SQL token rows. Capture in shell variables, never print or persist.
+mint_sanctum(){
+ local account="$1"
+ docker exec "$web" php -r '
+ require "vendor/autoload.php";
+ $app=require "bootstrap/app.php";
+ $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+ $user=Fleetbase\Models\User::where("public_id",$argv[1])->firstOrFail();
+ $new=$user->createToken("rc1-sanctum-real-mint",["*"]);
+ echo $new->plainTextToken;
+ ' "$account" 2>/dev/null
+}
+no_role_minted=$(mint_sanctum rc1-auth-user-a) || { echo RC1_SANCTUM_REAL_MINT=NO_GO_A;exit 2; }
+admin_minted=$(mint_sanctum rc1-auth-user-b) || { echo RC1_SANCTUM_REAL_MINT=NO_GO_B;exit 2; }
+[[ "$no_role_minted" == *"|"* && "$admin_minted" == *"|"* ]] || { echo RC1_SANCTUM_REAL_MINT=NO_GO_FORMAT; exit 2; }
+echo RC1_SANCTUM_REAL_CREATE_TOKEN=PASS
+classify_401(){
+ local token="$1" uri="$2" response
+ response=$(docker exec "$web" curl -s --max-time 15 -H 'Accept: application/json' -H "Authorization: Bearer $token" "http://127.0.0.1:18770/$uri" 2>/dev/null || true)
+ if [[ "$response" == *"User is not authorized to "* ]];then
+  echo PERMISSION_DENIED
+ elif [[ "$response" == *"Unauthenticated"* ]];then
+  echo UNAUTHENTICATED
+ else
+  echo OTHER
+ fi
+}
 # Internal API runs through a separate Sanctum and AuthorizationGuard flow.
 # This is a diagnostic: report exact HTTP codes without assuming a role gate.
 for profile in no_role admin; do
- if [[ "$profile" == no_role ]]; then t='rc1_sanctum_no_role_20261110'; else t='rc1_sanctum_admin_20261110'; fi
+ if [[ "$profile" == no_role ]]; then t="$no_role_minted"; else t="$admin_minted"; fi
  for uri in int/v1/orders int/v1/orders/rc1-test-order-a; do
   status_code=$(status "$t" "$uri")
   case "$uri" in
@@ -115,6 +143,9 @@ for profile in no_role admin; do
     *) label=DETAIL;;
   esac
   echo "RC1_SANCTUM_${profile}_${label}_HTTP=$status_code"
+  if [[ "$status_code" == 401 ]]; then
+    echo "RC1_SANCTUM_${profile}_${label}_401_CLASS=$(classify_401 "$t" "$uri")"
+  fi
   if [[ "$status_code" == 500 ]]; then
     # Only exception classes; never logs, error messages, tokens or PII.
     exception_classes=$(docker logs "$web" 2>&1 | grep -Eo '[A-Za-z_\\\\]+(Exception|Error)' | sort -u | head -n 10 | tr '\n' ',' || true)
