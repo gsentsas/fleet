@@ -96,6 +96,39 @@ canonical_dump_hash() {
     --single-transaction --quick --skip-comments --skip-dump-date \
     --set-gtid-purged=OFF --no-tablespaces --hex-blob "$1" | sha256sum | awk '{print $1}'
 }
+# Hash exact row counts for EVERY historical base table, not just schema shape.
+# Existing migration registries are excluded because RC1 legitimately appends
+# one migration; the new receipt table does not exist in the baseline table list.
+# No names, counts or customer records leave the host in the published log.
+historical_row_count_digest() {
+  local db="$1"
+  local tables
+  tables=$(docker exec "$container" mysql -uroot --protocol=socket -N -B -e "
+    SELECT TABLE_NAME FROM information_schema.tables
+    WHERE TABLE_SCHEMA='$db' AND TABLE_TYPE='BASE TABLE'
+      AND TABLE_NAME NOT IN ('migrations','telematic_webhook_receipts')
+    ORDER BY TABLE_NAME;")
+  [[ -n "$tables" ]] || return 2
+  printf '%s\n' "$tables" | python3 -c '
+import sys
+db=sys.argv[1]
+assert db in ("fleetbase","fleetbase_sandbox","fleetbase_storefront")
+q=lambda s:"`"+s.replace("`","``")+"`"
+names=[x.rstrip("\n") for x in sys.stdin if x.strip()]
+assert len(names)>25
+for name in names:
+    print("SELECT COUNT(*) FROM "+q(db)+"."+q(name)+";")
+' "$db" | docker exec -i "$container" mysql -uroot --protocol=socket -N -B | sha256sum | awk '{print $1}'
+}
+declare -A baseline_row_count_digest
+for name in fleetbase fleetbase_sandbox fleetbase_storefront; do
+  baseline_row_count_digest["$name"]=$(historical_row_count_digest "$name")
+  [[ "${#baseline_row_count_digest[$name]}" -eq 64 ]] || {
+    echo "RC1_S4_HISTORICAL_ROW_COUNT_DIGEST_$name=NO_GO"; exit 2;
+  }
+  echo "RC1_S4_HISTORICAL_ROW_COUNT_DIGEST_$name=CAPTURED"
+done
+
 declare -A baseline_digest
 for name in fleetbase fleetbase_sandbox fleetbase_storefront; do
   baseline_digest["$name"]=$(canonical_dump_hash "$name")
@@ -160,6 +193,16 @@ sandbox=$(docker exec "$container" mysql -uroot --protocol=socket -N -B -e "SELE
 echo "RC1_REAL_L12_PRIMARY_MIGRATIONS=$primary"
 echo "RC1_REAL_L12_SANDBOX_MIGRATIONS=$sandbox"
 [[ "$primary" -ge 394 && "$sandbox" -ge 304 ]] || { echo "RC1_REAL_L12_MIGRATION_REGISTRY=NO_GO"; exit 2; }
+# Compare all pre-existing business-table row counts after Laravel12 migration.
+for name in fleetbase fleetbase_sandbox fleetbase_storefront; do
+  after_counts=$(historical_row_count_digest "$name")
+  if [[ "$after_counts" != "${baseline_row_count_digest[$name]}" ]]; then
+    echo "RC1_S4_HISTORICAL_TABLE_ROW_COUNT_INVARIANTS_$name=NO_GO"
+    exit 2
+  fi
+  echo "RC1_S4_HISTORICAL_TABLE_ROW_COUNT_INVARIANTS_$name=PASS"
+done
+echo "RC1_S4_THREE_DATABASES_HISTORICAL_ROW_COUNTS=PASS"
 echo "RC1_REAL_L12_UPGRADE=PASS_ISOLATED"
 
 # This rollback rehearsal destroys ONLY upgraded schemas in the disposable
