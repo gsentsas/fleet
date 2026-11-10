@@ -1,4 +1,4 @@
-name: GST RC1 Laravel12 candidate validation (NO GO)
+name: GST RC1 committed Laravel12 lock validation (NO GO)
 
 on:
   pull_request:
@@ -35,8 +35,11 @@ jobs:
       COMPOSER_PROCESS_TIMEOUT: '600'
       COMPOSER_NO_AUDIT: '0'
     steps:
-      - name: Checkout original unmodified Fleetbase
+      - name: Checkout exact RC1 candidate SHA
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
 
       - name: PHP 8.2 and Composer
         uses: shivammathur/setup-php@v2
@@ -50,70 +53,26 @@ jobs:
           GH_JOB_TOKEN: ${{ github.token }}
         run: composer config --global github-oauth.github.com "$GH_JOB_TOKEN"
 
-      - name: Confirm original release is still pinned to Laravel 10
+      - name: Validate committed Laravel12 manifest and lock SHA before tests
         run: |
+          set -euo pipefail
+          test "$GITHUB_HEAD_REF" = "release/rc1-laravel12-consolidation-20261110"
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          printf '%s  %s\n' 'be721c73404b686992d5971abe712ab2c373bd0e4ecc58bfb2d0a2021be5297c' 'composer.json' | sha256sum --check --status
+          printf '%s  %s\n' 'b73196821fe46d45eb8f4f9e2bd6b0df90a2e62d911b8f840c7fc243c94ba453' 'composer.lock' | sha256sum --check --status
           python3 - <<'PY'
           import json
           from pathlib import Path
-          m=json.loads(Path("composer.json").read_text())
-          lock=json.loads(Path("composer.lock").read_text())
-          expected={
-              "laravel/framework": "^10.0",
-              "fleetbase/core-api": "^1.6.74",
-              "fleetbase/storefront-api": "^0.4.31",
-              "fleetbase/fleetops-api": "^0.6.75",
-          }
-          for key, version in expected.items():
-              if m["require"].get(key)!=version:
-                  raise SystemExit("STOP=CHANGED_ROOT_REQUIRE:"+key)
-          names={p["name"]:p for p in lock.get("packages",[])}
-          if names["fleetbase/core-api"]["source"]["reference"]!="ac97b5620b260660ae4e6fd5ea0e64025629b0c9":
-              raise SystemExit("STOP=CHANGED_CORE_BASELINE")
-          if names["fleetbase/storefront-api"]["source"]["reference"]!="2a5dd325b4d2777f0b644da53cf5c902a8e7ffc2":
-              raise SystemExit("STOP=CHANGED_STOREFRONT_BASELINE")
-          if names["fleetbase/fleetops-api"]["source"]["reference"]!="811aa711a68833dfd8390d8ddac582d4ed75f3c6":
-              raise SystemExit("STOP=CHANGED_FLEETOPS_BASELINE")
-          print("PINNED_ORIGINAL_BASELINE=PASS")
+          m=json.loads(Path('composer.json').read_text())
+          lock=json.loads(Path('composer.lock').read_text())
+          if m['require']['laravel/framework']!='^12.69.2': raise SystemExit('STOP=RC1_FRAMEWORK_NOT_12')
+          if m.get('config',{}).get('policy',{}).get('advisories'): raise SystemExit('STOP=RC1_AUDIT_WAIVERS')
+          if (len(lock.get('packages',[])),len(lock.get('packages-dev',[])))!=(235,38): raise SystemExit('STOP=RC1_LOCK_COUNTS')
+          print('RC1_COMMITTED_LOCK_SHA256_AND_COUNTS=PASS_235_38')
           PY
-
-      - name: Write three real fork SHAs and Laravel 12 target in EPHEMERAL manifest only
-        run: |
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          mfile=Path("composer.json")
-          m=json.loads(mfile.read_text())
-          if m.get("config",{}).get("policy",{}).get("advisories"):
-              raise SystemExit("STOP=ROOT_POLICY_UNEXPECTED")
-          m["require"]["laravel/framework"]="^12.69.2"
-          m["require"]["fleetbase/core-api"]="dev-compat/rc1-laravel12-core-regressions#f81cf74e38f9c11d03d0da6d6bdc9a489c7a52dd as 1.6.74"
-          m["require"]["fleetbase/storefront-api"]="dev-compat/p0-f8d3-r12-uuid-default#b6d596154370ed5770225d889363a74fab56e584 as 0.4.31"
-          m["require"]["fleetbase/fleetops-api"]="dev-compat/p0-f8d3-r11-unsigned-decimal#665e4fdf16f0344a24a273ebd1599b92ba6c2728 as 0.6.75"
-          if m["require-dev"].get("nunomaduro/collision")!="^7.0":
-              raise SystemExit("STOP=COLLISION_EXPECTED_7")
-          if m["require-dev"].get("phpunit/phpunit")!="^10.0":
-              raise SystemExit("STOP=PHPUNIT_EXPECTED_10")
-          m["require-dev"]["nunomaduro/collision"]="^8.0"
-          m["require-dev"]["phpunit/phpunit"]="^11.0"
-          sources=[
-              ("gsentsas/core-api","fleetbase/core-api"),
-              ("gsentsas/storefront","fleetbase/storefront-api"),
-              ("gsentsas/fleetops","fleetbase/fleetops-api"),
-          ]
-          m["repositories"]=[
-              {"type":"vcs","url":"https://github.com/"+repo,"canonical":True,"only":[name]}
-              for repo,name in sources
-          ]+m.get("repositories",[])
-          mfile.write_text(json.dumps(m,indent=4)+"\n")
-          print("CANDIDATE_SOURCE_COUNT=3")
-          print("CANDIDATE_SOURCE_PROVENANCE=EXACT_SHA")
-          print("CANDIDATE_LARAVEL_TARGET=12.69.2")
-          print("APP_PRODUCT_FILES_MODIFIED=NO_EPHEMERAL_CI_ONLY")
-          PY
-          # Lock validation is deferred until after the ephemeral Composer update:
-          # this manifest intentionally differs from the still-pinned Laravel 10 lock.
-          composer validate --no-check-lock --no-check-publish
-
+          composer validate --no-check-publish
+          test -z "$(git status --porcelain -- composer.json composer.lock)"
+          echo "RC1_NO_RE_RESOLUTION=PASS_COMMITTED_LOCK"
       - name: Test GitHub VCS metadata access in read-only mode without printing tokens
         env:
           GH_JOB_TOKEN: ${{ github.token }}
@@ -159,31 +118,18 @@ jobs:
             echo "COMPOSER_SOURCE_AUTH=GITHUB_TOKEN_AVAILABLE"
           fi
 
-      - name: Attempt full Composer resolution on disposable runner WITHOUT security waivers
+      - name: Confirm committed lock before strict audit (no composer update)
         id: solve
         run: |
-          set +e
-          composer update --no-install --no-plugins --no-scripts \
-            --no-progress --no-interaction --prefer-dist \
-            > "$RUNNER_TEMP/gst-f8d3-real-forks-solver.log" 2>&1
-          rc=$?
-          set -e
-          echo "$rc" > "$RUNNER_TEMP/gst-f8d3-solver-rc.txt"
-          echo "REAL_FORKS_SOLVER_RC=$rc"
-          tail -n 180 "$RUNNER_TEMP/gst-f8d3-real-forks-solver.log"
-          if [ "$rc" -ne 0 ]; then
-            echo "REAL_FORKS_SOLVER=BLOCKED_NO_GO"
-          else
-            echo "REAL_FORKS_SOLVER=RESOLVED_CODE_UNTESTED_NO_GO"
-          fi
-
+          set -euo pipefail
+          printf '%s  %s\n' 'b73196821fe46d45eb8f4f9e2bd6b0df90a2e62d911b8f840c7fc243c94ba453' 'composer.lock' | sha256sum --check --status
+          echo "RC1_COMPOSER_UPDATE=NOT_RUN"
+          echo "RC1_LOCK_SOURCE=COMMITTED_BRANCH"
       - name: Check exact fork commit refs and strict audit on candidate
         id: candidate_audit
         run: |
-          if [ "$(cat "$RUNNER_TEMP/gst-f8d3-solver-rc.txt")" -ne 0 ]; then
-            echo "STOP=FORK_LOCK_PROOF_NOT_PRODUCED_SOLVER_FAILED"
-            exit 2
-          fi
+          set -euo pipefail
+          test -s composer.lock
           python3 - <<'PY'
           import json
           from pathlib import Path
@@ -225,6 +171,14 @@ jobs:
           COMPOSER_NO_AUDIT=0 composer install --prefer-dist --no-scripts --no-plugins \
             --no-progress --no-interaction --optimize-autoloader
           echo "LARAVEL12_EPHEMERAL_INSTALL=PASS"
+
+      - name: Confirm committed Composer files unchanged after install
+        run: |
+          set -euo pipefail
+          printf '%s  %s\n' 'be721c73404b686992d5971abe712ab2c373bd0e4ecc58bfb2d0a2021be5297c' 'composer.json' | sha256sum --check --status
+          printf '%s  %s\n' 'b73196821fe46d45eb8f4f9e2bd6b0df90a2e62d911b8f840c7fc243c94ba453' 'composer.lock' | sha256sum --check --status
+          test -z "$(git status --porcelain -- composer.json composer.lock)"
+          echo "RC1_POST_INSTALL_COMMITTED_LOCK_UNCHANGED=PASS"
 
       - name: Verify RC1 Core patches in the installed fork
         run: |
@@ -640,14 +594,12 @@ jobs:
           grep -qx 'LEDGER_RACE_BENCH_MYSQL=PASS' "$RUNNER_TEMP/gst-f8d3-ledger-race-mysql.log"
           echo "LARAVEL12_MYSQL8_ANTI_REPLAY_LEDGER=PASS"
 
-      - name: Upload ONLY diagnostic output (no composer.lock)
+      - name: Upload locked-candidate diagnostic logs
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: gst-f8d3-real-forks-solver-logs-NOT-DEPLOYABLE
+          name: gst-rc1-locked-candidate-logs-NOT-DEPLOYABLE
           path: |
-            ${{ runner.temp }}/gst-f8d3-real-forks-solver.log
-            ${{ runner.temp }}/gst-f8d3-solver-rc.txt
             ${{ runner.temp }}/gst-schema-*.txt
             ${{ runner.temp }}/gst-f8d3-migrate-*.log
             ${{ runner.temp }}/gst-f8d3-ledger-race-*.log
@@ -668,12 +620,11 @@ jobs:
       - name: Prevent release from a compatibility experiment
         if: ${{ always() }}
         run: |
-          echo "LARAVEL12_CODE_COMPATIBILITY=UNVERIFIED"
-          echo "RC1_PRODUCTION_DECISION=NO_GO"
+          echo "RC1_PRODUCTION_DECISION=NO_GO_PENDING_STAGING_REVIEW"
           exit 1
 
   baseline-security:
-    name: Original dependency security audit (must block)
+    name: RC1 committed Composer security audit (strict)
     runs-on: ubuntu-latest
     timeout-minutes: 12
     defaults:
@@ -682,12 +633,22 @@ jobs:
     env:
       COMPOSER_NO_AUDIT: '0'
     steps:
-      - name: Checkout unmodified original API lock
+      - name: Checkout committed RC1 SHA for security audit
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
       - name: Set up PHP 8.2 and Composer
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.2'
           coverage: none
-      - name: Audit original API lock with no exceptions
-        run: composer audit --locked --format=plain
+      - name: Audit committed lock full and runtime, abandoned fail
+        run: |
+          set -euo pipefail
+          printf '%s  %s\n' 'be721c73404b686992d5971abe712ab2c373bd0e4ecc58bfb2d0a2021be5297c' 'composer.json' | sha256sum --check --status
+          printf '%s  %s\n' 'b73196821fe46d45eb8f4f9e2bd6b0df90a2e62d911b8f840c7fc243c94ba453' 'composer.lock' | sha256sum --check --status
+          composer validate --no-check-publish
+          composer audit --locked --abandoned=fail --format=plain
+          composer audit --locked --no-dev --abandoned=fail --format=plain
+          echo "RC1_COMMITTED_LOCK_AUDITS=PASS_FULL_AND_RUNTIME"
