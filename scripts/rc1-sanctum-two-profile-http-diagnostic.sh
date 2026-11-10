@@ -51,6 +51,11 @@ echo RC1_AUTH_FIXTURES=PASS
 # A = non-admin with no explicit role; B = synthetic admin control profile.
 docker exec -i "$name" mysql -uroot --protocol=socket fleetbase >/dev/null <<'SQL'
 UPDATE users SET type='admin' WHERE public_id='rc1-auth-user-b';
+-- Company memberships are mandatory for proxying IAM permission methods.
+-- No role/permission attached to company A's membership.
+INSERT INTO company_users(uuid,company_uuid,user_uuid,status,created_at,updated_at) VALUES
+('fa111111-1111-4111-8111-111111111111','aa111111-1111-4111-8111-111111111111','ca111111-1111-4111-8111-111111111111','active',NOW(),NOW()),
+('fb222222-2222-4222-8222-222222222222','bb222222-2222-4222-8222-222222222222','cb222222-2222-4222-8222-222222222222','active',NOW(),NOW());
 INSERT INTO personal_access_tokens(tokenable_type,tokenable_id,name,token,abilities,created_at,updated_at)
 SELECT CONCAT('Fleetbase',CHAR(92),'Models',CHAR(92),'User'),uuid,
  'rc1-no-role',SHA2('rc1_sanctum_no_role_20261110',256),'["*"]',NOW(),NOW()
