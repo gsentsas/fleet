@@ -284,3 +284,16 @@ On the private host, both pinned runtimes were started in short-lived PHP contai
 An earlier JWT test without explicit `scp` also allowed the own channel, but the foreign-channel request failed with `authorize_timeout` because no authorization API was present. That timeout was **not** accepted as a tenant-isolation proof; the subsequent scoped-token test explicitly tested and passed the local `out_of_scope` rule.
 
 **Limits:** The Redis retry test exercises an intentional transient exception, not permanent failure/dead-letter handling, failed-job persistence, or real Fleetbase business jobs. Signed SocketCluster scope authorization is verified, but not an API-minted real session token, live cross-company business IDOR case, secure publish flow or full-stack failover. Dedicated staging and complete multi-service rollback remain prerequisites for production. `PRODUCTION=NO_GO`.
+
+
+## Permanent Redis job failure persisted into isolated MySQL failed_jobs — PASS (2026-11-10)
+
+The newly versioned `scripts/rc1-isolated-redis-failed-job-persistence.sh` (commit `f8c65437`) was executed **as committed** with `bash -n=PASS` and final exit code **0** on the authorized host. It uses **only disposable synthetic data** and explicitly validates the application's configured `QUEUE_FAILED_DRIVER=database-uuids` error-persistence behavior.
+
+- Docker Redis 7.4 container `--network none`, no published ports, read-only root, 128 MiB RAM, no persistent volume; pinned temporary MySQL 8 container shares this isolated namespace, uses ephemeral `tmpfs` for DB data, a read-only root and 1024 MiB RAM. PHP 8.2 containers (384 MiB max) run the pinned Laravel12 and historical Laravel10 app code read-only, with isolated caches.
+- A source-backed, disposable serialized Laravel queued closure **always raises a synthetic test-only RuntimeException**; dispatched once per runtime via its actual Redis queue. Workers run `artisan queue:work redis --once --tries=1 --backoff=0 --timeout=12`.
+- Laravel12: **1** job enqueued → **1** record in disposable MySQL `fleetbase.failed_jobs` → **0** remaining Redis queued jobs. `RC1_L12_FAILED_JOB_PERSISTENCE=PASS`.
+- Laravel10: identical result, `RC1_L10_FAILED_JOB_PERSISTENCE=PASS`.
+- `RC1_FAILED_JOBS_L12_L10=PASS_EPHEMERAL`; **run exit 0**. Lab source was removed from `/dev/shm`, both test containers were destroyed and verified absent; original production MySQL and Queue remained healthy.
+
+**Scope:** This is genuine Laravel Redis → worker → **MySQL failed-job persistence**, but the `failed_jobs` table was created explicitly in a clean, disposable MySQL database with the expected structure, not proven against a production-size restored database. It does not verify monitoring/alerts, `queue:retry` manual replay, queue ordering, dead-letter procedures or business job effects. End-to-end authenticated tenant/IDOR API scenarios and a full private staging multi-service rollback remain **NOT TESTED**. `PRODUCTION=NO_GO`.
