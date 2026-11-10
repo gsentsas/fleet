@@ -210,7 +210,7 @@ jobs:
             else
               test "$restored" -eq 33
             fi
-            python3 rc1/scripts/rc1-schema-fingerprint.py "$db" > "$RUNNER_TEMP/s7-recovered${suffix}.sha256"
+            python3 ../scripts/rc1-schema-fingerprint.py "$db" > "$RUNNER_TEMP/s7-recovered${suffix}.sha256"
             if ! cmp -s "$RUNNER_TEMP/s7-old${suffix}.sha256" "$RUNNER_TEMP/s7-recovered${suffix}.sha256"; then
               echo "STOP=S7_RELATIONAL_SCHEMA_FINGERPRINT_MISMATCH:${db}"
               exit 2
