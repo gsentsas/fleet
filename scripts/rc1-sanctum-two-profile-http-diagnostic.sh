@@ -154,6 +154,22 @@ for profile in no_role admin; do
   [[ "$status_code" =~ ^[0-9]{3}$ ]] || { echo RC1_SANCTUM_HTTP=NO_GO_TRANSPORT; exit 2; }
  done
 done
+# Assert the observed role decisions, including writes and SQL side effects.
+admin_own=$(status "$admin_minted" 'int/v1/orders/rc1-test-order-b')
+admin_foreign=$(status "$admin_minted" 'int/v1/orders/rc1-test-order-a')
+no_role_own=$(status "$no_role_minted" 'int/v1/orders/rc1-test-order-a')
+echo "RC1_SANCTUM_ADMIN_OWN_DETAIL_HTTP=$admin_own"
+echo "RC1_SANCTUM_ADMIN_FOREIGN_DETAIL_HTTP=$admin_foreign"
+echo "RC1_SANCTUM_NO_ROLE_OWN_DETAIL_HTTP=$no_role_own"
+no_role_put=$(docker exec "$web" curl -s -o /dev/null -w '%{http_code}' --max-time 15 --request PUT -H 'Accept: application/json' -H 'Content-Type: application/json' -H "Authorization: Bearer $no_role_minted" --data '{"notes":"rc1-forbidden"}' 'http://127.0.0.1:18770/int/v1/orders/rc1-test-order-a' || echo ERROR)
+no_role_delete=$(docker exec "$web" curl -s -o /dev/null -w '%{http_code}' --max-time 15 --request DELETE -H 'Accept: application/json' -H "Authorization: Bearer $no_role_minted" 'http://127.0.0.1:18770/int/v1/orders/rc1-test-order-a' || echo ERROR)
+echo "RC1_SANCTUM_NO_ROLE_OWN_PUT_HTTP=$no_role_put"
+echo "RC1_SANCTUM_NO_ROLE_OWN_DELETE_HTTP=$no_role_delete"
+unchanged=$(docker exec "$name" mysql -uroot --protocol=socket -N -B -e "SELECT COUNT(*) FROM fleetbase.orders WHERE public_id IN ('rc1-test-order-a','rc1-test-order-b') AND notes IS NULL AND deleted_at IS NULL AND status='created';")
+[[ "$unchanged" == 2 ]] || { echo RC1_SANCTUM_NO_ROLE_MUTATIONS=NO_GO_SQL;exit 2; }
+echo RC1_SANCTUM_NO_ROLE_MUTATIONS=PASS_SQL_UNCHANGED
+[[ "$admin_own" == 200 && "$admin_foreign" == 404 && "$no_role_own" == 401 && "$no_role_put" == 401 && "$no_role_delete" == 401 ]] || { echo RC1_SANCTUM_ROLE_MATRIX=NO_GO_CODES;exit 2; }
+echo RC1_SANCTUM_ADMIN_NO_ROLE_HTTP_MATRIX=PASS
 echo RC1_SANCTUM_HTTP_PROBE=EXECUTED_NOT_YET_ROLE_APPROVED
 
 echo RC1_REAL_TWO_BEARER_HTTP_ORDER_IDOR=PASS
