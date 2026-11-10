@@ -413,3 +413,20 @@ The newly committed reproducible `scripts/rc1-api-auth-session-candidate-lab.sh`
 The script was revised to assess order IDOR independently from the organization endpoint and to test both A and B (commit `630e05f8`). The next run aborted **before any container started** because the available host memory was around **3.6 GiB**, below the existing 5 GiB safety gate (no swap, production running on the same host). The latest script now emits **`RC1_REAL_TWO_BEARER_HTTP=NO_GO_MEMORY_BELOW_5_GIB`** at that guard (commit `7c8ff471`). **Do not lower the 5 GiB guard or disrupt production to force these tests**. Run the complete two-way test on a dedicated, sufficiently provisioned staging host when available.
 
 **Cleanup and security:** No production migrations, database writes, exposed ports, merged Core API patches, or production restarts. Ephemeral MySQL and HTTP containers and temporary candidate files were removed. Existing production services remain healthy. This is a significant A→B HTTP test result but **not** a complete approval gate. **PR #6 DRAFT; PRODUCTION NO-GO.**
+
+
+## RESOLUTION — Real authenticated two-bearer HTTP read isolation PASS with disposable Redis (2026-11-10)
+
+**Supersedes the earlier partial/no-go outcomes above for the specific *read-only HTTP IDOR* gate.** The reproducible script `scripts/rc1-two-bearer-http-isolated.sh` at fix commit `b4b6f67acf4bba74e81f424177d81d02286fdded` now includes a **private disposable Redis 7.4** in the same Docker `--network none` namespace as the restored MySQL 8 test container and the PHP/Laravel12 HTTP server. Redis is explicitly needed by Fleetbase organization/branding/resource paths; omission caused the previous `RedisException` / HTTP 500 responses. The temporary container name bug in the first Redis-enabled script was fixed before the successful run.
+
+**Successful real HTTP run:** `RC1_AUTH_RESTORED_152=PASS`, `RC1_AUTH_FIXTURES=PASS`, `RC1_AUTH_REDIS_EPHEMERAL=PASS`, `RC1_AUTH_HEALTH=PASS`, `RC1_AUTH_REDIS_FULL_LAB_EXIT=0`. Two synthetic users, companies, API bearer credentials and orders were appended **only to disposable restored MySQL**, whose original customer contents never left the isolated namespace. Both Core API security candidate files (`Auth.php` and `HasApiModelBehavior.php`, branch HEAD `15b7437908252488b551cf4b0ef8d5c71ff54d81`) were mounted read-only over the pinned vendor tree; **neither is integrated in RC1 Composer lock or production**.
+
+| Actual HTTP GET | Token/company A | Token/company B |
+|---|---:|---:|
+| `/v1/organizations/current` | **200** | **200** |
+| Own synthetic `/v1/orders/{id}` | **200** | **200** |
+| Foreign company synthetic `/v1/orders/{id}` | **404** | **404** |
+
+Anonymous GET of an order is **401**; health GET is **200**. Real Fleetbase HTTP middleware, bearer API credential resolution, session company context, controller and authorization flow were exercised (no mocked directives in this HTTP run). The **two-way authenticated HTTP order READ IDOR gate is now PASS on the candidate**. The earlier one-off B→A HTTP 500 was not reproduced in the final complete lab and had been classified NO-GO until this successful final run. Both legitimate own-order reads succeed and cross-company reads return 404.
+
+**Limits and decision:** This is **only GET** on two synthetic orders and with the isolated *candidate* code; it does not cover API authenticated PATCH/PUT/DELETE, permission-role matrices, Sanctum tokens, other resources, tenancy in asynchronous jobs, performance or simultaneous full-stack staging upgrade/rollback. Do not merge the candidate or RC1 solely on this evidence. All temporary PHP, MySQL and Redis containers and candidate files were cleaned up, production services unchanged. **`AUTHENTICATED_TWO_WAY_HTTP_ORDER_READ_IDOR=PASS_CANDIDATE`; `PRODUCTION=NO_GO`.**
