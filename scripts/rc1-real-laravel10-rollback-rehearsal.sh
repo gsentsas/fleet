@@ -179,7 +179,17 @@ echo "RC1_S7_REAL_DATABASE_ROLLBACK_START"
 for pair in fleetbase:152 fleetbase_sandbox:138 fleetbase_storefront:33; do
   name=${pair%%:*}; expected=${pair##*:}
   # Names are a static, audited whitelist and never user-supplied.
-  docker exec "$container" mysql -uroot --protocol=socket -e "DROP DATABASE \`$name\`; CREATE DATABASE \`$name\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" >/dev/null 2>&1
+  diagnostics=$(mktemp /dev/shm/gst-rc1-s7-schema.XXXXXXXX)
+  if ! docker exec "$container" mysql -uroot --protocol=socket -e "DROP DATABASE \`$name\`; CREATE DATABASE \`$name\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" >/dev/null 2>"$diagnostics"; then
+    code=$(grep -Eom 1 'ERROR [0-9]+' "$diagnostics" || true)
+    echo "RC1_S7_RECREATE_$name=NO_GO"
+    echo "RC1_S7_MYSQL_ERROR=${code:-UNCLASSIFIED}"
+    echo "RC1_S7_MYSQL_STATE=$(docker inspect "$container" --format 'running={{.State.Running}} oom={{.State.OOMKilled}}' 2>/dev/null || echo UNKNOWN)"
+    echo "RC1_S7_MYSQL_TMPFS=$(docker exec "$container" df -k /var/lib/mysql 2>/dev/null | awk 'NR==2 {print "free_kib="$4}' || true)"
+    exit 2
+  fi
+  rm -f "$diagnostics"; diagnostics=""
+  echo "RC1_S7_RECREATE_$name=PASS"
   path=$(restic --no-lock ls "$snapshot" --json | python3 -c '
 import json,sys
 name=sys.argv[1]
