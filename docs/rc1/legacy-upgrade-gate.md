@@ -267,3 +267,20 @@ On the private host, both pinned runtimes were started in short-lived PHP contai
 - An anonymous SocketCluster client attempted to subscribe to `user.rc1-no-credentials`. Server response: **subscription denied with reason `no_token`**, `RC1_SOCKET_UNAUTHENTICATED_SUBSCRIBE=PASS`.
 
 **Remaining gaps:** authenticated/tenant-scoped HTTP business flows; Redis retry/failure recovery and real Fleetbase job processing; signed WebSocket token and authorized pub/sub; full-stack concurrent HTTP + queue + socket with rollback and traffic switching on a **dedicated staging host**. These isolated unit-sized integration probes are **not** proof of production multi-service failover. PR #6 remains DRAFT, `PRODUCTION=NO_GO`.
+
+
+## Real Redis first-failure retry + signed SocketCluster scope authorization — PASS (2026-11-10)
+
+**Redis retry lab:** A source-backed disposable `CallQueuedClosure` was enqueued into local ephemeral Redis 7.4 with `--network none`. On its first execution, the closure incremented a test-only Redis attempt counter then intentionally threw `RuntimeException`; it set a completion marker only on the second execution. For each runtime, the test ran `artisan queue:work redis --once --tries=2 --backoff=0 --timeout=12` twice. Pinned Laravel 12 and historical Laravel 10 each yielded exactly:
+
+- Initial job queued = **1**.
+- Attempts after first worker invocation = **1**.
+- Attempts after second worker invocation = **2**.
+- Final completion marker = **yes**.
+- `RC1_L12_REDIS_FAILURE_RETRY=PASS` and `RC1_L10_REDIS_FAILURE_RETRY=PASS`, command exit 0. No business job, production Redis, MySQL or external services were accessed. Temporary source and Docker containers were deleted.
+
+**Signed WebSocket policy lab:** Pinned Fleetbase SocketCluster v0.7.75 ran with a throwaway HS256 key, `AUTH_ENABLED=true`, `AUTH_MODE=enforce`, `--network none`, no exposed ports, a read-only root and 256 MiB memory limit. A SocketCluster client used a *real correctly signed* test JWT with user claims and a **single explicit `scp` scope**. It authenticated successfully and was permitted to subscribe to `user.rc1-user-1`; subscription to `user.rc1-other-user` was **denied with exactly `out_of_scope`**. `RC1_SOCKET_SIGNED_SCOPE_POLICY=PASS`, exit 0.
+
+An earlier JWT test without explicit `scp` also allowed the own channel, but the foreign-channel request failed with `authorize_timeout` because no authorization API was present. That timeout was **not** accepted as a tenant-isolation proof; the subsequent scoped-token test explicitly tested and passed the local `out_of_scope` rule.
+
+**Limits:** The Redis retry test exercises an intentional transient exception, not permanent failure/dead-letter handling, failed-job persistence, or real Fleetbase business jobs. Signed SocketCluster scope authorization is verified, but not an API-minted real session token, live cross-company business IDOR case, secure publish flow or full-stack failover. Dedicated staging and complete multi-service rollback remain prerequisites for production. `PRODUCTION=NO_GO`.
