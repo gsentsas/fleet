@@ -222,3 +222,21 @@ The new HTTP probes are included in the complete, committed `scripts/rc1-real-la
 - Complete script **exit 0**; ephemeral lab containers removed and production API/MySQL healthy.
 
 **Scope:** an HTTP health smoke and database/CLI rollback are not a full end-to-end HTTP workflow, queue/worker or socket failover. These require dedicated full-stack staging with safe egress rules before releasing. `PRODUCTION=NO_GO`.
+
+
+## Protected HTTP GET unauthorized checks — Laravel 12 and restored Laravel 10 (2026-11-10)
+
+The complete, committed real-data laboratory script `scripts/rc1-real-laravel10-rollback-rehearsal.sh` (change `138f8db0`) now tests **five read-only protected HTTP GET endpoints with no credentials** while the restored MySQL database is actually available. This is important: the initial no-database experiment produced 503 and **was not counted as an authentication success**.
+
+| Route (GET, unauthenticated) | After Laravel 12 upgrade | After restoring Laravel 10 |
+|---|---:|---:|
+| `/v1/orders` | **401** | **401** |
+| `/v1/drivers` | **401** | **401** |
+| `/v1/vehicles` | **401** | **401** |
+| `/int/v1/orders` | **401** | **401** |
+| `/int/v1/users` | **401** | **401** |
+| `/health` | **200** | **200** |
+
+Checks run within one networkless Docker namespace, no public ports, no credentials, no write requests, no response bodies printed. Both `RC1_L12_UNAUTHENTICATED_ROUTE_DENIAL=PASS` and `RC1_L10_UNAUTHENTICATED_ROUTE_DENIAL=PASS`. The same rehearsal preserved all historical business-row hashes after Laravel12 migration, then restored 3/3 original database SQL hashes with pinned Laravel10 CLI startup PASS. **Full script exit code 0** and no remaining lab containers; production API/MySQL stayed healthy.
+
+**Boundary:** these are negative unauthorized GET checks, not actual authenticated API business workflows, tenant/IDOR coverage, worker processing, or socket failover. Those tests remain outstanding and production stays NO-GO.
