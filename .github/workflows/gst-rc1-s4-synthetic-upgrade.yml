@@ -122,6 +122,16 @@ jobs:
           DELETE FROM migrations WHERE migration = '2026_11_08_000001_create_telematic_webhook_receipts_table';
           SQL
           mysql -h 127.0.0.1 -uroot -N -B gst_rc1_s4_synthetic -e "SELECT COUNT(*) FROM migrations WHERE migration = '2026_11_08_000001_create_telematic_webhook_receipts_table'" | grep -qx 0
+          # Capture a fully synthetic pre-upgrade SQL snapshot and test business
+          # marker. This backup must never contain an actual user or production row.
+          mysql -h 127.0.0.1 -uroot gst_rc1_s4_synthetic <<'SQL'
+          CREATE TABLE s4_synthetic_business_marker (id INT PRIMARY KEY, marker CHAR(64) NOT NULL);
+          INSERT INTO s4_synthetic_business_marker (id, marker)
+          VALUES (1, SHA2('rc1-s7-disposable-row-retention-proof', 256));
+          SQL
+          mysqldump --host=127.0.0.1 --user=root --single-transaction --quick --no-tablespaces gst_rc1_s4_synthetic > "$RUNNER_TEMP/s4-preupgrade.sql"
+          test -s "$RUNNER_TEMP/s4-preupgrade.sql"
+          echo "S7_SYNTHETIC_PRE_UPGRADE_SNAPSHOT=PASS"
           php artisan migrate --force --no-interaction --no-ansi > "$RUNNER_TEMP/s4-incremental.log" 2>&1 || {
             tail -n 55 "$RUNNER_TEMP/s4-incremental.log"
             exit 2
@@ -138,8 +148,18 @@ jobs:
           php artisan migrate --force --no-interaction --no-ansi > "$RUNNER_TEMP/s4-rerun.log" 2>&1
           grep -q 'Nothing to migrate' "$RUNNER_TEMP/s4-rerun.log"
           echo "S4_SYNTHETIC_RERUN_IDEMPOTENT=PASS"
+          # Check existing synthetic rows were preserved across the incremental
+          # migration, then recover the PRE-UPGRADE database into a new database.
+          mysql -h 127.0.0.1 -uroot -N -B gst_rc1_s4_synthetic -e "SELECT marker FROM s4_synthetic_business_marker WHERE id=1" | grep -qx "$(printf 'rc1-s7-disposable-row-retention-proof' | sha256sum | cut -d' ' -f1)"
+          echo "S4_SYNTHETIC_ROW_RETENTION=PASS"
+          mysql -h 127.0.0.1 -uroot -e 'CREATE DATABASE gst_rc1_s7_rollback CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci'
+          mysql -h 127.0.0.1 -uroot gst_rc1_s7_rollback < "$RUNNER_TEMP/s4-preupgrade.sql"
+          mysql -h 127.0.0.1 -uroot -N -B gst_rc1_s7_rollback -e "SELECT marker FROM s4_synthetic_business_marker WHERE id=1" | grep -qx "$(printf 'rc1-s7-disposable-row-retention-proof' | sha256sum | cut -d' ' -f1)"
+          mysql -h 127.0.0.1 -uroot -N -B gst_rc1_s7_rollback -e "SELECT COUNT(*) FROM migrations WHERE migration='2026_11_08_000001_create_telematic_webhook_receipts_table'" | grep -qx 0
+          mysql -h 127.0.0.1 -uroot -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='gst_rc1_s7_rollback' AND table_name='telematic_webhook_receipts'" | grep -qx 0
+          echo "S7_SYNTHETIC_DATABASE_SNAPSHOT_ROLLBACK=PASS"
           echo "S4_REAL_LARAVEL10_SNAPSHOT_UPGRADE=NOT_TESTED"
-          echo "S7_ROLLBACK=NOT_TESTED"
+          echo "S7_REAL_PRODUCTION_ROLLBACK=NOT_TESTED"
           echo "PRODUCTION_DECISION=NO_GO"
 
       - name: Print safe diagnostics on failure
