@@ -178,6 +178,8 @@ else
   DB_PASSWORD="$(gen_secret 20)"
   DB_USERNAME="fleetbase"
   DB_DATABASE="fleetbase"
+  DB_HOST="database"
+  DB_PORT="3306"
   DATABASE_URL="mysql://${DB_USERNAME}:${DB_PASSWORD}@database/${DB_DATABASE}"
   success "Secure database credentials auto-generated"
 fi
@@ -464,6 +466,15 @@ YAML_HEADER
   env_line "ENVIRONMENT"       "$ENVIRONMENT"
   env_line "APP_DEBUG"         "$APP_DEBUG"
   env_line "DATABASE_URL"      "$DATABASE_URL"
+  # Explicit DB_* values keep Artisan's mysql:createdb, application and
+  # extension connection providers on the same Docker network database.
+  # A DATABASE_URL alone is insufficient when a provider consults DB_*.
+  env_line "DB_CONNECTION"     "mysql"
+  env_line "DB_HOST"           "$DB_HOST"
+  env_line "DB_PORT"           "$DB_PORT"
+  env_line "DB_DATABASE"       "$DB_DATABASE"
+  env_line "DB_USERNAME"       "$DB_USERNAME"
+  env_line "DB_PASSWORD"       "$DB_PASSWORD"
   env_line "SESSION_DOMAIN"    "$SESSION_DOMAIN"
   env_line "FRONTEND_HOSTS"    "$FRONTEND_HOSTS"
   # Mail
@@ -504,6 +515,32 @@ YAML_HEADER
     environment:
       SOCKETCLUSTER_OPTIONS: '${SOCKETCLUSTER_OPTIONS}'
 YAML_SOCKET
+
+  cat <<YAML_WORKER_DB
+
+  queue:
+    environment:
+YAML_WORKER_DB
+  env_line "DATABASE_URL"      "$DATABASE_URL"
+  env_line "DB_CONNECTION"     "mysql"
+  env_line "DB_HOST"           "$DB_HOST"
+  env_line "DB_PORT"           "$DB_PORT"
+  env_line "DB_DATABASE"       "$DB_DATABASE"
+  env_line "DB_USERNAME"       "$DB_USERNAME"
+  env_line "DB_PASSWORD"       "$DB_PASSWORD"
+
+  cat <<YAML_SCHEDULER_DB
+
+  scheduler:
+    environment:
+YAML_SCHEDULER_DB
+  env_line "DATABASE_URL"      "$DATABASE_URL"
+  env_line "DB_CONNECTION"     "mysql"
+  env_line "DB_HOST"           "$DB_HOST"
+  env_line "DB_PORT"           "$DB_PORT"
+  env_line "DB_DATABASE"       "$DB_DATABASE"
+  env_line "DB_USERNAME"       "$DB_USERNAME"
+  env_line "DB_PASSWORD"       "$DB_PASSWORD"
 
   # Add database service block only when using the bundled container
   if [[ "$DB_MODE" == "internal" ]]; then
@@ -651,6 +688,39 @@ if [[ "$DB_MODE" == "internal" ]]; then
     -e "GRANT ALL PRIVILEGES ON *.* TO '${DB_USERNAME}'@'%'; FLUSH PRIVILEGES;"
   success "Privileges granted to '${DB_USERNAME}'"
 fi
+
+###############################################################################
+# STEP 12c — Fail closed if Laravel resolves the wrong database host
+###############################################################################
+# No SQL executed here. Do not print passwords, URLs or full config.
+# The application container must read the exact same nonsecret DB host, db name,
+# and username that were placed into docker-compose.override.yml.
+section "Verifying Laravel Database Configuration"
+docker compose exec -T application php -r '
+require "/fleetbase/api/vendor/autoload.php";
+$app = require "/fleetbase/api/bootstrap/app.php";
+$app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+$config = config("database.connections.mysql", []);
+$expected = [
+    "host" => getenv("DB_HOST"),
+    "database" => getenv("DB_DATABASE"),
+    "username" => getenv("DB_USERNAME"),
+    "port" => getenv("DB_PORT") ?: "3306",
+];
+foreach ($expected as $field => $value) {
+    $actual = $config[$field] ?? null;
+    if (!is_string($value) || $value === "" || (string) $actual !== (string) $value) {
+        fwrite(STDERR, "STOP=INSTALLER_LARAVEL_DB_CONFIG_MISMATCH_" . strtoupper($field) . "\n");
+        exit(2);
+    }
+}
+if (($config["driver"] ?? null) !== "mysql" || config("database.default") !== "mysql") {
+    fwrite(STDERR, "STOP=INSTALLER_LARAVEL_DB_DRIVER_MISMATCH\n");
+    exit(2);
+}
+echo "INSTALLER_LARAVEL_DB_CONFIG=PASS_MATCHED_RUNTIME_NON_SECRET_FIELDS\n";
+'
+success "Laravel DB configuration matches installer targets"
 
 ###############################################################################
 # STEP 13 — Run deploy script
