@@ -33,6 +33,12 @@ class Rc1TenantMutationModel extends Illuminate\Database\Eloquent\Model {
   protected $table='orders';
   protected $fillable=['company_uuid','public_id','reference'];
   public $timestamps=false;
+  // Synthetic fixture has no API authorization-directives catalog. This
+  // override only bypasses that separate dependency; tenant query selection
+  // still runs in the real Core API methods.
+  public function applyDirectivesToQuery(\Illuminate\Http\Request $request, $builder) {
+    return $builder;
+  }
 }
 Rc1TenantMutationModel::insert([
   ['company_uuid'=>'rc1-a','public_id'=>'order-a','reference'=>'A'],
@@ -58,8 +64,12 @@ $route->controller=new class extends Illuminate\Routing\Controller {};
 $request->setRouteResolver(fn()=>$route);
 $app->make('session.store')->put('company','rc1-a');
 $model=new Rc1TenantMutationModel();
-// Positive-session getById requires full directives schema, not this minimal lab.
-// Positive-session update requires full directives schema, not this minimal lab.
+// Exercise the real positive-session read/update path with authorization-directive
+// resolution intentionally stubbed (the fixture does not model the directives DB).
+mustDeny(fn()=>$model->getById('order-b',null,$request),'GET');
+mustDeny(fn()=>$model->updateRecordFromRequest($request,'order-b'),'UPDATE');
+requirePass(Rc1TenantMutationModel::where('company_uuid','rc1-b')->value('reference')==='B','FOREIGN_VALUE_UNCHANGED');
+
 mustDeny(fn()=>$model->remove('order-b'),'REMOVE');
 mustDeny(fn()=>$model->bulkRemove(['order-b']),'BULK');
 requirePass(Rc1TenantMutationModel::where('company_uuid','rc1-b')->count()===1,'FOREIGN_UNCHANGED');
