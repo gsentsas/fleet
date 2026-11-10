@@ -462,3 +462,21 @@ Anonymous GET order 401, health 200. Markers `RC1_REAL_TWO_BEARER_HTTP_ORDER_IDO
 - The corrected final script `bash -n=PASS`; the next run was rejected by the host RAM preflight: **`RC1_REAL_TWO_BEARER_HTTP=NO_GO_MEMORY_BELOW_5_GIB`**, exit 2 **before any test container started**. Host memory available at last check ~4.2 GiB; no swap. Production Fleetbase services remain healthy. Do not lower this guard or stop any production service.
 
 **Decision:** `AUTHENTICATED_OWN_PUT_A_B=PASS`, `AUTHENTICATED_OWN_DELETE_A=PASS`, `AUTHENTICATED_OWN_DELETE_B_HTTP_200_OBSERVED_SQL_PROOF=PENDING`, `CORRECTED_FULL_OWN_WRITE_GATE=NOT_COMPLETED_DUE_MEMORY`; **PR #6 DRAFT, candidate NOT INTEGRATED, PRODUCTION NO-GO**. Next run must be on sufficiently provisioned staging or after free host RAM exceeds the existing safe threshold, without production disruption.
+
+
+## FINAL RESOLUTION — Two-bearer authenticated OWN and FOREIGN HTTP GET/PUT/DELETE PASS (2026-11-10)
+
+**This supersedes the preceding PARTIAL PASS/NO-GO entry for the own-tenant positive PUT/DELETE test.** The exact committed regression script `scripts/rc1-two-bearer-http-own-write-lab.sh` at revision `831e2c8f98400979a6eeb00bd2c0a150dd6b8f36` was rerun after the production host's available memory returned above the strict 5 GiB guard (about 6.0 GiB at preflight). `bash -n=PASS`, full run **EXIT 0**. No safety limit was lowered.
+
+The isolated lab used the same pinned Laravel12 HTTP runtime and the unmerged Core API candidate read-only overrides, two real test bearer API keys for two fictional companies, Restic-restored disposable MySQL8 with 152 tables and throwaway Redis7.4. All three containers operated with `--network none`, no published ports, read-only API source, resource caps, tmpfs MySQL data and no connection to live service databases.
+
+**Full successful assertions for both companies A and B:**
+- Own order `GET` HTTP **200**, foreign order `GET` HTTP **404**.
+- Foreign `PUT` HTTP **404** and foreign `DELETE` HTTP **404**, with both fictional rows initially unchanged (`notes IS NULL`, `deleted_at IS NULL`, original status).
+- Own `PUT` HTTP **200**; SQL verified each company's order notes exactly changed to the synthetic expected value, while the other organization's row retained its expected prior value.
+- Own `DELETE` HTTP **200** for **both** A and B. SQL confirms `deleted_at IS NOT NULL` for each independently; the final assertion confirms both fictional orders soft-deleted and both carrying the expected previously authorized notes.
+- Anonymous GET returns HTTP **401**; `GET /v1/organizations/current` returns HTTP **200** with either bearer.
+
+Verified markers: `RC1_SIDE_a=PASS_OWN_PUT_DB_EFFECT`, `RC1_SIDE_b=PASS_OWN_PUT_DB_EFFECT`, `RC1_SIDE_a=PASS_OWN_DELETE_SQL`, `RC1_SIDE_b=PASS_OWN_DELETE_SQL`, `RC1_FINAL_TWO_OWN_SOFT_DELETES=PASS`, `RC1_REAL_TWO_BEARER_HTTP_OWN_PUT_DELETE=PASS`, `RC1_REAL_TWO_BEARER_HTTP_ORDER_IDOR=PASS`, `RC1_REAL_TWO_BEARER_HTTP_FOREIGN_PUT_DELETE=PASS`, **exit 0**.
+
+**Scope and decisions:** `AUTHENTICATED_TWO_BEARER_ORDER_HTTP_GET_PUT_DELETE=PASS_CANDIDATE`, covering **both permitted and forbidden cross-tenant paths** for two synthetic orders and actual API credential middleware. This does not approve the overall RC1 release: permission/role matrix, Sanctum tokens, missing-company real HTTP cases, other tenant-owned resources, fault injection and full multi-service staging rollback remain to be completed. The Core API patch has **not been merged/pinned**, PR #6 remains DRAFT and **PRODUCTION=NO_GO**.
