@@ -129,6 +129,29 @@ for name in fleetbase fleetbase_sandbox fleetbase_storefront; do
   echo "RC1_S4_HISTORICAL_ROW_COUNT_DIGEST_$name=CAPTURED"
 done
 
+# Hash actual values of all historical business rows, not just counts.
+# Omit the migration registries and the new RC1-only receipts table.
+# Deterministic primary-key ordering makes the comparison independent of
+# changing physical row layout. Only the digests/status are printed.
+historical_data_digest() {
+  local db="$1"
+  docker exec "$container" mysqldump -uroot --protocol=socket \
+    --single-transaction --quick --skip-comments --skip-dump-date \
+    --set-gtid-purged=OFF --no-tablespaces --hex-blob \
+    --no-create-info --order-by-primary --skip-triggers \
+    --ignore-table="$db.migrations" \
+    --ignore-table="$db.telematic_webhook_receipts" \
+    "$db" | sha256sum | awk '{print $1}'
+}
+declare -A baseline_data_digest
+for name in fleetbase fleetbase_sandbox fleetbase_storefront; do
+  baseline_data_digest["$name"]=$(historical_data_digest "$name")
+  [[ "${#baseline_data_digest[$name]}" -eq 64 ]] || {
+    echo "RC1_S4_HISTORICAL_DATA_DIGEST_$name=NO_GO"; exit 2;
+  }
+  echo "RC1_S4_HISTORICAL_DATA_DIGEST_$name=CAPTURED"
+done
+
 declare -A baseline_digest
 for name in fleetbase fleetbase_sandbox fleetbase_storefront; do
   baseline_digest["$name"]=$(canonical_dump_hash "$name")
@@ -203,6 +226,17 @@ for name in fleetbase fleetbase_sandbox fleetbase_storefront; do
   echo "RC1_S4_HISTORICAL_TABLE_ROW_COUNT_INVARIANTS_$name=PASS"
 done
 echo "RC1_S4_THREE_DATABASES_HISTORICAL_ROW_COUNTS=PASS"
+# Compare row VALUES of all pre-existing tables using canonical data-only SQL
+# streams. This catches changes in values even when row counts are unchanged.
+for name in fleetbase fleetbase_sandbox fleetbase_storefront; do
+  current_data_digest=$(historical_data_digest "$name")
+  if [[ "$current_data_digest" != "${baseline_data_digest[$name]}" ]]; then
+    echo "RC1_S4_HISTORICAL_ROW_VALUES_$name=NO_GO"
+    exit 2
+  fi
+  echo "RC1_S4_HISTORICAL_ROW_VALUES_$name=PASS"
+done
+echo "RC1_S4_THREE_DB_HISTORICAL_ROW_VALUES=PASS"
 echo "RC1_REAL_L12_UPGRADE=PASS_ISOLATED"
 
 # This rollback rehearsal destroys ONLY upgraded schemas in the disposable
