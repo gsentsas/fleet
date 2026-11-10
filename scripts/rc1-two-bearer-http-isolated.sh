@@ -27,6 +27,9 @@ if ! restic --no-lock dump "$snap" "$path" | gzip -dc | docker exec -i "$name" m
 [[ "$(docker exec "$name" mysql -uroot --protocol=socket -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='fleetbase' AND table_type='BASE TABLE'")" == 152 ]] || exit 2
 echo RC1_AUTH_RESTORED_152=PASS
 docker exec -i "$name" mysql -uroot --protocol=socket fleetbase >/dev/null <<'SQL'
+-- Synthetic users and their companies form an FK cycle; populate both in
+-- disposable MySQL, then restore FK enforcement before running HTTP probes.
+SET FOREIGN_KEY_CHECKS=0;
 INSERT INTO users(uuid,public_id,company_uuid,username,name,type,status) VALUES
 ('ca111111-1111-4111-8111-111111111111','rc1-auth-user-a','aa111111-1111-4111-8111-111111111111','rc1-auth-user-a','RC1 Test A','user','active'),
 ('cb222222-2222-4222-8222-222222222222','rc1-auth-user-b','bb222222-2222-4222-8222-222222222222','rc1-auth-user-b','RC1 Test B','user','active');
@@ -39,6 +42,7 @@ INSERT INTO api_credentials(uuid,user_uuid,company_uuid,name,`key`,api) VALUES
 INSERT INTO orders(uuid,public_id,company_uuid,created_by_uuid,status) VALUES
 ('ea111111-1111-4111-8111-111111111111','rc1-test-order-a','aa111111-1111-4111-8111-111111111111','ca111111-1111-4111-8111-111111111111','created'),
 ('eb222222-2222-4222-8222-222222222222','rc1-test-order-b','bb222222-2222-4222-8222-222222222222','cb222222-2222-4222-8222-222222222222','created');
+SET FOREIGN_KEY_CHECKS=1;
 SQL
 echo RC1_AUTH_FIXTURES=PASS
 app=/root/.gst-rc1-runtime-31a6a026/repo/api
