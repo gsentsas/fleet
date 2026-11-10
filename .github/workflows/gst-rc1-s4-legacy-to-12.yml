@@ -124,6 +124,14 @@ jobs:
           fi
           mysql -h 127.0.0.1 -uroot -N -B gst_rc1_s4_upgrade -e 'SELECT COUNT(*) FROM migrations' | awk '{if ($1<200) exit 2; print "S4_LARAVEL10_MIGRATION_ROWS="$1}'
           mysql -h 127.0.0.1 -uroot -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='gst_rc1_s4_upgrade' AND table_type='BASE TABLE'" | awk '{if ($1<100) exit 2; print "S4_LARAVEL10_TABLES="$1}'
+          # Legacy production has a separate sandbox migration history.
+          # Populate it before calling any three-schema rollback proof valid.
+          if ! php artisan sandbox:migrate --force --no-interaction --no-ansi > "$RUNNER_TEMP/s4-l10-sandbox.log" 2>&1; then
+            echo "STOP=LARAVEL10_SANDBOX_MIGRATE_FAILED"
+            tail -n 55 "$RUNNER_TEMP/s4-l10-sandbox.log"
+            exit 2
+          fi
+          mysql -h 127.0.0.1 -uroot -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='gst_rc1_s4_upgrade_sandbox' AND table_type='BASE TABLE'" | awk '{if ($1<100) exit 2; print "S4_LARAVEL10_SANDBOX_TABLES="$1}'
           echo "S4_LARAVEL10_SYNTHETIC_SCHEMA=PASS"
 
       - name: Snapshot the three historical synthetic databases before upgrade
@@ -164,6 +172,12 @@ jobs:
           mysql -h 127.0.0.1 -uroot -N -B gst_rc1_s4_upgrade -e "SELECT COUNT(*) FROM migrations WHERE migration='2026_11_08_000001_create_telematic_webhook_receipts_table'" | grep -qx 1
           mysql -h 127.0.0.1 -uroot -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='gst_rc1_s4_upgrade' AND table_name='telematic_webhook_receipts'" | grep -qx 1
           echo "S4_LARAVEL10_TO_12_SYNTHETIC_SCHEMA_UPGRADE=PASS"
+          if ! php artisan sandbox:migrate --force --no-interaction --no-ansi > "$RUNNER_TEMP/s4-l12-sandbox-upgrade.log" 2>&1; then
+            echo "STOP=LARAVEL10_TO_12_SANDBOX_UPGRADE_FAILED"
+            tail -n 55 "$RUNNER_TEMP/s4-l12-sandbox-upgrade.log"
+            exit 2
+          fi
+          echo "S4_LARAVEL10_TO_12_SYNTHETIC_SANDBOX_UPGRADE=PASS"
           php artisan migrate --force --no-interaction --no-ansi > "$RUNNER_TEMP/s4-l12-rerun.log" 2>&1
           grep -q 'Nothing to migrate' "$RUNNER_TEMP/s4-l12-rerun.log"
           echo "S4_LARAVEL12_UPGRADE_RERUN_NOOP=PASS"
@@ -180,6 +194,7 @@ jobs:
             mysql -h 127.0.0.1 -uroot "$db" < "$RUNNER_TEMP/s7-old${suffix}.sql"
             expected=$(mysql -h 127.0.0.1 -uroot -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='gst_rc1_s4_upgrade${suffix}' AND table_type='BASE TABLE'")
             restored=$(mysql -h 127.0.0.1 -uroot -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$db' AND table_type='BASE TABLE'")
+            echo "S7_RECOVERED_SCHEMA_TABLE_COUNT:${db}=${restored}:UPGRADED=${expected}"
             test "$restored" -ge 30
             # The only expected additional table after the RC1 upgrade in
             # the primary DB is the new receipt ledger. Confirm the recovered
