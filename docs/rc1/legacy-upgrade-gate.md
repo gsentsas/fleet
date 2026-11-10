@@ -94,3 +94,16 @@ The committed **read-only** script `scripts/rc1-real-backup-integrity-preflight.
 - The newest daily snapshot was pinned by immutable snapshot ID, rather than using a moving `latest` selector.
 - The three exports `fleetbase.sql.gz`, `fleetbase_sandbox.sql.gz`, `fleetbase_storefront.sql.gz` were each streamed from **that same snapshot** into `gzip -t`, and all **passed**.
 - Archive integrity is **not** the same as valid SQL or restorable customer data. Importing all three backups into an isolated DB, schema/row integrity and complete application rollback are still **NOT TESTED**. Production remains **NO-GO**.
+
+
+## Read-only structural inspection of genuine backup SQL — 2026-11-10
+
+A pinned daily Restic snapshot (ID prefix `860ef168c572`) was streamed directly into a SQL statement counter without persisting or disclosing data. The new committed script `scripts/rc1-real-backup-sql-structure-preflight.sh` ran on mail01 with `bash -n=PASS`, exit code `0` and fail-closed expected schema counts.
+
+| Dump | `CREATE TABLE` statements | `INSERT INTO` statements | Uncompressed bytes |
+|---|---:|---:|---:|
+| `fleetbase` | 152 | 50 | 8,321,796 |
+| `fleetbase_sandbox` | 138 | 4 | 365,945 |
+| `fleetbase_storefront` | 33 | 2 | 73,085 |
+
+All three **structural presence checks PASS** and match the audited live table counts. These are statement counts, **not data row counts, parse validity, SQL import success, consistency, or rollback evidence**. The application and MySQL production containers were verified healthy following execution. No actual MySQL import, migration, service restart, data extraction or staging installation occurred. `PRODUCTION=NO_GO`.
