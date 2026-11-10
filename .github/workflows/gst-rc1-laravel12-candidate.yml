@@ -1,0 +1,693 @@
+name: GST RC1 Laravel12 candidate validation (NO GO)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/gst-rc1-laravel12-candidate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  real-forks-compatibility:
+    name: PHP 8.2 / Composer / 3 pinned real forks (diagnostic)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      mysql:
+        image: mysql:8.0-oracle
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+          MYSQL_DATABASE: gst_f8d3_probe
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+    defaults:
+      run:
+        working-directory: api
+    env:
+      COMPOSER_NO_INTERACTION: '1'
+      COMPOSER_PROCESS_TIMEOUT: '600'
+      COMPOSER_NO_AUDIT: '0'
+    steps:
+      - name: Checkout original unmodified Fleetbase
+        uses: actions/checkout@v4
+
+      - name: PHP 8.2 and Composer
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, xml, gd, zip, pdo_mysql, pdo_sqlite, sqlite3, intl, bcmath, gmp
+          coverage: none
+
+      - name: Configure read-only GitHub Composer API token
+        env:
+          GH_JOB_TOKEN: ${{ github.token }}
+        run: composer config --global github-oauth.github.com "$GH_JOB_TOKEN"
+
+      - name: Confirm original release is still pinned to Laravel 10
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          m=json.loads(Path("composer.json").read_text())
+          lock=json.loads(Path("composer.lock").read_text())
+          expected={
+              "laravel/framework": "^10.0",
+              "fleetbase/core-api": "^1.6.74",
+              "fleetbase/storefront-api": "^0.4.31",
+              "fleetbase/fleetops-api": "^0.6.75",
+          }
+          for key, version in expected.items():
+              if m["require"].get(key)!=version:
+                  raise SystemExit("STOP=CHANGED_ROOT_REQUIRE:"+key)
+          names={p["name"]:p for p in lock.get("packages",[])}
+          if names["fleetbase/core-api"]["source"]["reference"]!="ac97b5620b260660ae4e6fd5ea0e64025629b0c9":
+              raise SystemExit("STOP=CHANGED_CORE_BASELINE")
+          if names["fleetbase/storefront-api"]["source"]["reference"]!="2a5dd325b4d2777f0b644da53cf5c902a8e7ffc2":
+              raise SystemExit("STOP=CHANGED_STOREFRONT_BASELINE")
+          if names["fleetbase/fleetops-api"]["source"]["reference"]!="811aa711a68833dfd8390d8ddac582d4ed75f3c6":
+              raise SystemExit("STOP=CHANGED_FLEETOPS_BASELINE")
+          print("PINNED_ORIGINAL_BASELINE=PASS")
+          PY
+
+      - name: Write three real fork SHAs and Laravel 12 target in EPHEMERAL manifest only
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          mfile=Path("composer.json")
+          m=json.loads(mfile.read_text())
+          if m.get("config",{}).get("policy",{}).get("advisories"):
+              raise SystemExit("STOP=ROOT_POLICY_UNEXPECTED")
+          m["require"]["laravel/framework"]="^12.69.2"
+          m["require"]["fleetbase/core-api"]="dev-compat/rc1-laravel12-core-regressions#f81cf74e38f9c11d03d0da6d6bdc9a489c7a52dd as 1.6.74"
+          m["require"]["fleetbase/storefront-api"]="dev-compat/p0-f8d3-r12-uuid-default#b6d596154370ed5770225d889363a74fab56e584 as 0.4.31"
+          m["require"]["fleetbase/fleetops-api"]="dev-compat/p0-f8d3-r11-unsigned-decimal#665e4fdf16f0344a24a273ebd1599b92ba6c2728 as 0.6.75"
+          if m["require-dev"].get("nunomaduro/collision")!="^7.0":
+              raise SystemExit("STOP=COLLISION_EXPECTED_7")
+          if m["require-dev"].get("phpunit/phpunit")!="^10.0":
+              raise SystemExit("STOP=PHPUNIT_EXPECTED_10")
+          m["require-dev"]["nunomaduro/collision"]="^8.0"
+          m["require-dev"]["phpunit/phpunit"]="^11.0"
+          sources=[
+              ("gsentsas/core-api","fleetbase/core-api"),
+              ("gsentsas/storefront","fleetbase/storefront-api"),
+              ("gsentsas/fleetops","fleetbase/fleetops-api"),
+          ]
+          m["repositories"]=[
+              {"type":"vcs","url":"https://github.com/"+repo,"canonical":True,"only":[name]}
+              for repo,name in sources
+          ]+m.get("repositories",[])
+          mfile.write_text(json.dumps(m,indent=4)+"\n")
+          print("CANDIDATE_SOURCE_COUNT=3")
+          print("CANDIDATE_SOURCE_PROVENANCE=EXACT_SHA")
+          print("CANDIDATE_LARAVEL_TARGET=12.69.2")
+          print("APP_PRODUCT_FILES_MODIFIED=NO_EPHEMERAL_CI_ONLY")
+          PY
+          # Lock validation is deferred until after the ephemeral Composer update:
+          # this manifest intentionally differs from the still-pinned Laravel 10 lock.
+          composer validate --no-check-lock --no-check-publish
+
+      - name: Test GitHub VCS metadata access in read-only mode without printing tokens
+        env:
+          GH_JOB_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          while read -r repo revision; do
+            [ -n "$repo" ] || continue
+            uri="https://api.github.com/repos/$repo/commits/$revision"
+            status_auth=$(curl -sS --max-time 20 -o /dev/null -w "%{http_code}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $GH_JOB_TOKEN" "$uri")
+            status_public=$(curl -sS --max-time 20 -o /dev/null -w "%{http_code}" \
+              -H "Accept: application/vnd.github+json" "$uri")
+            echo "GITHUB_PUBLIC_REPO_STATUS=$repo auth:$status_auth anonymous:$status_public"
+            if [ "$status_auth" != 200 ] && [ "$status_public" != 200 ]; then
+              echo "STOP=GITHUB_METADATA_UNREADABLE"
+              exit 2
+            fi
+          done <<'REVISIONS'
+          gsentsas/core-api f81cf74e38f9c11d03d0da6d6bdc9a489c7a52dd
+          gsentsas/storefront b6d596154370ed5770225d889363a74fab56e584
+          gsentsas/fleetops 665e4fdf16f0344a24a273ebd1599b92ba6c2728
+          geocoder-php/GeocoderLaravel 13.2.2
+          REVISIONS
+          rate=$(curl -sS --max-time 20 -H "Authorization: Bearer $GH_JOB_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            https://api.github.com/rate_limit | \
+            php -r '$x=json_decode(stream_get_contents(STDIN),true); echo is_array($x) ? ($x["resources"]["core"]["remaining"] ?? "UNKNOWN") : "UNAVAILABLE";')
+          echo "GITHUB_TOKEN_CORE_REMAINING=$rate"
+          if [ "$rate" = 0 ]; then
+            # The repo-scoped Actions token has no remaining API quota.
+            # Public fork refs already returned anonymous HTTP 200 above.
+            # Avoid feeding an exhausted token back to Composer; do not add scopes.
+            composer config --global --unset github-oauth.github.com || true
+            # Force raw Git transport for public VCS metadata: no GitHub REST API quota.
+            composer config --global use-github-api false
+            for name in core-api storefront fleetops; do
+              git ls-remote --exit-code "https://github.com/gsentsas/$name.git" HEAD >/dev/null
+              echo "PUBLIC_GIT_TRANSPORT_$name=PASS"
+            done
+            echo "COMPOSER_SOURCE_AUTH=PUBLIC_GIT_DIRECT_NO_GITHUB_API"
+          else
+            echo "COMPOSER_SOURCE_AUTH=GITHUB_TOKEN_AVAILABLE"
+          fi
+
+      - name: Attempt full Composer resolution on disposable runner WITHOUT security waivers
+        id: solve
+        run: |
+          set +e
+          composer update --no-install --no-plugins --no-scripts \
+            --no-progress --no-interaction --prefer-dist \
+            > "$RUNNER_TEMP/gst-f8d3-real-forks-solver.log" 2>&1
+          rc=$?
+          set -e
+          echo "$rc" > "$RUNNER_TEMP/gst-f8d3-solver-rc.txt"
+          echo "REAL_FORKS_SOLVER_RC=$rc"
+          tail -n 180 "$RUNNER_TEMP/gst-f8d3-real-forks-solver.log"
+          if [ "$rc" -ne 0 ]; then
+            echo "REAL_FORKS_SOLVER=BLOCKED_NO_GO"
+          else
+            echo "REAL_FORKS_SOLVER=RESOLVED_CODE_UNTESTED_NO_GO"
+          fi
+
+      - name: Check exact fork commit refs and strict audit on candidate
+        id: candidate_audit
+        run: |
+          if [ "$(cat "$RUNNER_TEMP/gst-f8d3-solver-rc.txt")" -ne 0 ]; then
+            echo "STOP=FORK_LOCK_PROOF_NOT_PRODUCED_SOLVER_FAILED"
+            exit 2
+          fi
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          from urllib.parse import urlsplit
+          lock=json.loads(Path("composer.lock").read_text())
+          packages={p["name"]:p for p in lock.get("packages",[])}
+          pins={
+              "fleetbase/core-api":("https://github.com/gsentsas/core-api.git","f81cf74e38f9c11d03d0da6d6bdc9a489c7a52dd"),
+              "fleetbase/storefront-api":("https://github.com/gsentsas/storefront.git","b6d596154370ed5770225d889363a74fab56e584"),
+              "fleetbase/fleetops-api":("https://github.com/gsentsas/fleetops.git","665e4fdf16f0344a24a273ebd1599b92ba6c2728"),
+          }
+          def public_repo_path(value):
+              try:
+                  p=urlsplit(value)
+                  if p.scheme!="https" or p.hostname!="github.com" or p.username or p.password or p.port or p.query or p.fragment:
+                      return None
+                  return p.path.strip("/").removesuffix(".git").lower()
+              except (ValueError, TypeError):
+                  return None
+          for name,(url,sha) in pins.items():
+              entry=packages.get(name)
+              source=entry.get("source",{}) if entry else {}
+              actual_path=public_repo_path(source.get("url",""))
+              actual_ref=source.get("reference")
+              print("FORK_CANDIDATE="+name+" path="+str(actual_path or "INVALID")+" ref="+str(actual_ref or "MISSING"))
+              if actual_path!=public_repo_path(url) or actual_ref!=sha:
+                  raise SystemExit("STOP=UNPINNED_FORK:"+name)
+          print("ALL_THREE_FORKS_PINNED=PASS_EXACT_SHAS")
+          PY
+          COMPOSER_NO_AUDIT=0 composer audit --locked --abandoned=fail --format=plain
+          COMPOSER_NO_AUDIT=0 composer audit --locked --no-dev --abandoned=fail --format=plain
+          echo "RC1_CANDIDATE_FULL_AND_RUNTIME_AUDITS=PASS"
+
+      - name: Install audited candidate dependencies in disposable runner (scripts/plugins disabled)
+        id: install
+        run: |
+          test -s composer.lock
+          composer validate --no-check-publish
+          COMPOSER_NO_AUDIT=0 composer install --prefer-dist --no-scripts --no-plugins \
+            --no-progress --no-interaction --optimize-autoloader
+          echo "LARAVEL12_EPHEMERAL_INSTALL=PASS"
+
+      - name: Verify RC1 Core patches in the installed fork
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          base=Path("vendor/fleetbase/core-api")
+          pkg=json.loads((base/"composer.json").read_text())
+          if pkg.get("require",{}).get("cknow/laravel-money")!="v8.5.0":
+              raise SystemExit("STOP=RC1_MONEY_RUNTIME_VERSION")
+          if "cknow/laravel-money" in pkg.get("require-dev",{}):
+              raise SystemExit("STOP=RC1_MONEY_DEV_DUPLICATE")
+          exporter=(base/"src/Support/Reporting/ReportQueryExporter.php").read_text()
+          if exporter.count("is_string($value) && strtotime($value) === false")!=2:
+              raise SystemExit("STOP=RC1_EXPORTER_DATE_GUARD")
+          expirable=(base/"src/Traits/Expirable.php").read_text()
+          if "return (int) (-1 * $this->{$column}->diffInSeconds(Carbon::now(), false));" not in expirable:
+              raise SystemExit("STOP=RC1_EXPIRABLE_TTL_CAST")
+          print("RC1_INSTALLED_CORE_PATCHES=PASS_THREE_TARGETED_CHANGES")
+          PY
+
+      - name: Validate real PHP autoload and Laravel 12 class contracts
+        run: |
+          php <<'PHP'
+          <?php
+          declare(strict_types=1);
+          require 'vendor/autoload.php';
+          $required = [
+              \Illuminate\Foundation\Application::class,
+              \Fleetbase\Support\PushNotification::class,
+              \Fleetbase\FleetOps\Support\Geocoding::class,
+              \Geocoder\Laravel\Http\LaravelHttpClient::class,
+              \AaronFrancis\FastPaginate\FastPaginateProvider::class,
+          ];
+          foreach ($required as $name) {
+              if (!class_exists($name)) {
+                  fwrite(STDERR, "STOP=RUNTIME_CLASS_NOT_FOUND:".$name."\n");
+                  exit(2);
+              }
+          }
+          if (!str_starts_with(\Illuminate\Foundation\Application::VERSION, '12.')) {
+              fwrite(STDERR, "STOP=UNEXPECTED_FRAMEWORK_MAJOR\n"); exit(2);
+          }
+          if (!is_subclass_of(\Geocoder\Laravel\Http\LaravelHttpClient::class, \Psr\Http\Client\ClientInterface::class)) {
+              fwrite(STDERR, "STOP=GEOCODER_NOT_PSR18\n"); exit(2);
+          }
+          echo "LARAVEL12_AUTOLOAD_SMOKE=PASS_FRAMEWORK_AND_FORKS\n";
+          PHP
+
+      - name: Exercise installed FleetOps Geocoder and notification contracts without network
+        env:
+          APP_ENV: testing
+        run: |
+          php <<'PHP'
+          <?php
+          declare(strict_types=1);
+          require 'vendor/autoload.php';
+          $path = 'vendor/fleetbase/fleetops-api/server/config/geocoder.php';
+          if (!is_file($path)) { fwrite(STDERR, "STOP=GEOCODER_CONFIG_NOT_INSTALLED\n"); exit(2); }
+          $config = require $path;
+          if (($config['adapter'] ?? null) !== \Geocoder\Laravel\Http\LaravelHttpClient::class) {
+              fwrite(STDERR, "STOP=GEOCODER_ADAPTER_MISMATCH\n"); exit(2);
+          }
+          if (!isset($config['providers'][\Geocoder\Provider\Chain\Chain::class][\Geocoder\Provider\GoogleMaps\GoogleMaps::class])) {
+              fwrite(STDERR, "STOP=GOOGLE_MAPS_CHAIN_MISSING\n"); exit(2);
+          }
+          foreach ([
+              \NotificationChannels\Fcm\FcmMessage::class,
+              \NotificationChannels\Twilio\TwilioSmsMessage::class,
+              \Fleetbase\Twilio\Twilio::class,
+          ] as $name) {
+              if (!class_exists($name)) { fwrite(STDERR, "STOP=NOTIFICATION_CLASS_MISSING:".$name."\n"); exit(2); }
+          }
+          echo "LARAVEL12_GEOCODER_NOTIFICATION_CONTRACTS=PASS_NO_NETWORK\n";
+          PHP
+
+      - name: Test Core FCM notification and FastPaginate 2 behavior with SQLite and no network
+        run: |
+          php <<'PHP'
+          <?php
+          declare(strict_types=1);
+          require 'vendor/autoload.php';
+
+          $app = new \Illuminate\Foundation\Application(getcwd());
+          $app->instance('config', new \Illuminate\Config\Repository([
+              'firebase' => ['projects' => ['app' => ['project_id' => 'fake-project']]],
+          ]));
+          \Illuminate\Container\Container::setInstance($app);
+          \Illuminate\Support\Facades\Facade::setFacadeApplication($app);
+
+          class GstFcmProbe extends \Fleetbase\Support\PushNotification {
+              public static \Kreait\Firebase\Contract\Messaging $messaging;
+              protected static function getFcmMessagingClient(): \Kreait\Firebase\Contract\Messaging {
+                  return self::$messaging;
+              }
+          }
+          GstFcmProbe::$messaging = \Mockery::mock(\Kreait\Firebase\Contract\Messaging::class);
+          $message = GstFcmProbe::createFcmMessage('Dispatch', 'Order ready', ['order_uuid' => 'order-1']);
+          if ($message->notification->title !== 'Dispatch' || $message->data !== ['order_uuid' => 'order-1']) {
+              fwrite(STDERR, "STOP=FCM_VALID_STRING_PAYLOAD_REGRESSION\n"); exit(2);
+          }
+          $rejected = false;
+          try {
+              GstFcmProbe::createFcmMessage('Dispatch', 'Order ready', ['count' => 2]);
+          } catch (\InvalidArgumentException $e) {
+              $rejected = true;
+          }
+          if (!$rejected) { fwrite(STDERR, "STOP=FCM_NON_STRING_DATA_NOT_REJECTED\n"); exit(2); }
+          \Mockery::close();
+          echo "LARAVEL12_CORE_FCM_CONTRACT=PASS_STRING_VALUES_AND_NONSTRING_REJECTION\n";
+
+          $capsule = new \Illuminate\Database\Capsule\Manager($app);
+          $capsule->addConnection(['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => ''], 'default');
+          $capsule->setAsGlobal();
+          $capsule->bootEloquent();
+          $schema = $capsule->getConnection('default')->getSchemaBuilder();
+          $schema->create('gst_fast_page', static function (\Illuminate\Database\Schema\Blueprint $table) {
+              $table->increments('id');
+              $table->string('label');
+          });
+          $capsule->getConnection('default')->table('gst_fast_page')->insert([
+              ['label' => 'Alpha'], ['label' => 'Beta'], ['label' => 'Gamma'],
+          ]);
+          (new \AaronFrancis\FastPaginate\FastPaginateProvider($app))->boot();
+          class GstFastPageRecord extends \Illuminate\Database\Eloquent\Model {
+              protected $table = 'gst_fast_page';
+              public $timestamps = false;
+              protected $guarded = [];
+          }
+          $page = GstFastPageRecord::query()->orderBy('id')->fastPaginate(2);
+          if (!$page instanceof \Illuminate\Pagination\LengthAwarePaginator ||
+              $page->total() !== 3 || $page->count() !== 2 ||
+              array_map(static fn($m) => $m->label, $page->items()) !== ['Alpha', 'Beta']) {
+              fwrite(STDERR, "STOP=FAST_PAGINATE_RESULT_CHANGED\n"); exit(2);
+          }
+          echo "LARAVEL12_FAST_PAGINATE2_SQLITE=PASS_3_RECORDS_PAGE_SIZE_2\n";
+          echo "LARAVEL12_BUSINESS_CONTRACTS=PASS_NO_NETWORK\n";
+          PHP
+
+      - name: Run real API PHPUnit unit tests on isolated Laravel 12 candidate
+        env:
+          APP_ENV: testing
+          APP_URL: http://localhost.test
+          DB_CONNECTION: sqlite
+          DB_DATABASE: ':memory:'
+          CACHE_STORE: array
+          CACHE_DRIVER: array
+          MAIL_MAILER: array
+          QUEUE_CONNECTION: sync
+          SESSION_DRIVER: array
+          LOG_CHANNEL: stderr
+          TELESCOPE_ENABLED: 'false'
+        run: |
+          export APP_KEY="$(php -r 'echo "base64:".base64_encode(random_bytes(32));')"
+          vendor/bin/phpunit -c phpunit.xml --testsuite Unit --colors=never
+          echo "LARAVEL12_API_UNIT_TESTS=PASS"
+
+      - name: Run real Laravel 12 API feature health endpoints against in-memory SQLite
+        env:
+          APP_ENV: testing
+          APP_URL: http://localhost.test
+          DB_CONNECTION: sqlite
+          DB_DATABASE: ':memory:'
+          CACHE_STORE: array
+          CACHE_DRIVER: array
+          MAIL_MAILER: array
+          QUEUE_CONNECTION: sync
+          SESSION_DRIVER: array
+          LOG_CHANNEL: stderr
+          TELESCOPE_ENABLED: 'false'
+        run: |
+          export APP_KEY="$(php -r 'echo "base64:".base64_encode(random_bytes(32));')"
+          vendor/bin/phpunit -c phpunit.xml --testsuite Feature --colors=never
+          echo "LARAVEL12_API_FEATURE_HEALTH_TESTS=PASS"
+
+      - name: Bootstrap Laravel 12 package discovery and enumerate routes without external services
+        env:
+          APP_ENV: testing
+          APP_URL: http://localhost.test
+          DB_CONNECTION: sqlite
+          DB_DATABASE: ':memory:'
+          CACHE_STORE: array
+          CACHE_DRIVER: array
+          MAIL_MAILER: array
+          QUEUE_CONNECTION: sync
+          SESSION_DRIVER: array
+          LOG_CHANNEL: stderr
+          TELESCOPE_ENABLED: 'false'
+        run: |
+          export APP_KEY="$(php -r 'echo "base64:".base64_encode(random_bytes(32));')"
+          if ! php artisan package:discover --no-ansi > "$RUNNER_TEMP/gst-laravel12-discover.log" 2>&1; then
+            echo "STOP=LARAVEL12_PACKAGE_DISCOVERY_FAILED"
+            tail -n 50 "$RUNNER_TEMP/gst-laravel12-discover.log"
+            exit 2
+          fi
+          echo "LARAVEL12_PACKAGE_DISCOVERY=PASS"
+          if ! php artisan route:list --json --no-ansi > "$RUNNER_TEMP/gst-laravel12-routes.json" 2> "$RUNNER_TEMP/gst-laravel12-routes-errors.log"; then
+            echo "STOP=LARAVEL12_ROUTE_LIST_FAILED"
+            tail -n 45 "$RUNNER_TEMP/gst-laravel12-routes-errors.log"
+            exit 2
+          fi
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          routes=json.loads(Path(__import__('os').environ["RUNNER_TEMP"]).joinpath("gst-laravel12-routes.json").read_text())
+          if not isinstance(routes,list) or len(routes)<3:
+              raise SystemExit("STOP=UNEXPECTED_LARAVEL12_ROUTE_CATALOG")
+          names={r.get("uri","") for r in routes}
+          if "/" not in names and "" not in names:
+              raise SystemExit("STOP=LARAVEL12_ROOT_ROUTE_MISSING")
+          if "health" not in names:
+              raise SystemExit("STOP=LARAVEL12_HEALTH_ROUTE_MISSING")
+          print("LARAVEL12_ROUTE_CATALOG=PASS")
+          print("LARAVEL12_ROUTE_COUNT="+str(len(routes)))
+          PY
+
+      - name: Replay all Laravel 12 package migrations against three fresh disposable MySQL 8 databases
+        env:
+          APP_ENV: testing
+          APP_URL: http://localhost.test
+          DB_CONNECTION: mysql
+          DB_HOST: 127.0.0.1
+          DB_PORT: '3306'
+          DB_USERNAME: root
+          DB_PASSWORD: ''
+          CACHE_STORE: array
+          CACHE_DRIVER: array
+          MAIL_MAILER: array
+          QUEUE_CONNECTION: sync
+          SESSION_DRIVER: array
+          LOG_CHANNEL: stderr
+          TELESCOPE_ENABLED: 'false'
+        run: |
+          export APP_KEY="$(php -r 'echo "base64:".base64_encode(random_bytes(32));')"
+          # Sanctum4 publishes rather than auto-registers its base migration.
+          # Copy the official audited vendor file for this throwaway DB replay ONLY.
+          # The permanent, version-controlled migration is NOT part of this experiment.
+          sanctum_migration="vendor/laravel/sanctum/database/migrations/2019_12_14_000001_create_personal_access_tokens_table.php"
+          target_migration="database/migrations/2019_12_14_000001_create_personal_access_tokens_table.php"
+          test -s "$sanctum_migration" && test ! -e "$target_migration"
+          grep -q "Schema::create('personal_access_tokens'" "$sanctum_migration"
+          mkdir -p database/migrations
+          cp "$sanctum_migration" "$target_migration"
+          echo "SANCTUM4_MIGRATION_SOURCE=OFFICIAL_VENDOR_PACKAGE_EPHEMERAL_ONLY"
+          # Schema check: every database lives only in this job's disposable MySQL service.
+          cat > "$RUNNER_TEMP/gst-schema-check.php" <<'PHP'
+          <?php
+          declare(strict_types=1);
+          [$script, $db, $mode] = $argv + [null, null, 'check'];
+          $pdo = new PDO('mysql:host=127.0.0.1;port=3306', 'root', '', [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+          $schemas = [$db, $db.'_sandbox', $db.'_storefront'];
+          if ($mode === 'create') {
+              foreach ($schemas as $name) {
+                  $exists = $pdo->query("SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = ".$pdo->quote($name))->fetchColumn();
+                  if ((int) $exists !== 0) { fwrite(STDERR, "STOP=MYSQL8_DB_NOT_FRESH:".$name."\n"); exit(2); }
+                  $pdo->exec("CREATE DATABASE `".$name."` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+              }
+              echo "MYSQL8_FRESH_DB_READY=".implode(',', $schemas)."\n";
+              exit(0);
+          }
+          $in = implode(',', array_map([$pdo, 'quote'], $schemas));
+          $strip = static fn (string $s): string => preg_replace('/^'.preg_quote($db, '/').'/', 'DB', $s);
+          $lines = [];
+          foreach ($pdo->query("SELECT table_schema AS sch, table_name AS tbl FROM information_schema.tables WHERE table_schema IN ($in) ORDER BY 1, 2") as $r) {
+              $lines[] = 'T '.$strip($r['sch']).'.'.$r['tbl'];
+          }
+          // Real column metadata, in physical column order (R11: unsigned decimals, nullability, defaults, collations).
+          foreach ($pdo->query("SELECT table_schema AS sch, table_name AS tbl, column_name AS col, column_type AS ctype, is_nullable AS nul, column_default AS dflt, collation_name AS coll FROM information_schema.columns WHERE table_schema IN ($in) ORDER BY table_schema, table_name, ordinal_position") as $r) {
+              $lines[] = 'C '.$strip($r['sch']).'.'.$r['tbl'].'.'.$r['col'].' '.$r['ctype'].' null='.$r['nul'].' default='.($r['dflt'] ?? 'NULL').' coll='.($r['coll'] ?? '-');
+          }
+          $indexes = $pdo->query("SELECT table_schema AS sch, table_name AS tbl, index_name AS idx, non_unique AS nu, GROUP_CONCAT(column_name ORDER BY seq_in_index) AS cols FROM information_schema.statistics WHERE table_schema IN ($in) GROUP BY 1, 2, 3, 4 ORDER BY 1, 2, 3")->fetchAll(PDO::FETCH_ASSOC);
+          foreach ($indexes as $r) {
+              $lines[] = 'I '.$strip($r['sch']).'.'.$r['tbl'].'.'.$r['idx'].'('.$r['cols'].')'.($r['nu'] ? '' : ' unique');
+          }
+          $fks = $pdo->query("SELECT k.table_schema AS sch, k.table_name AS tbl, k.constraint_name AS con, GROUP_CONCAT(k.column_name ORDER BY k.ordinal_position) AS cols, k.referenced_table_schema AS rsch, k.referenced_table_name AS rtbl, GROUP_CONCAT(k.referenced_column_name ORDER BY k.ordinal_position) AS rcols, r.update_rule AS ur, r.delete_rule AS dr FROM information_schema.key_column_usage k JOIN information_schema.referential_constraints r ON r.constraint_schema = k.table_schema AND r.constraint_name = k.constraint_name WHERE k.table_schema IN ($in) AND k.referenced_table_name IS NOT NULL GROUP BY 1, 2, 3, 5, 6, 8, 9 ORDER BY 1, 2, 3")->fetchAll(PDO::FETCH_ASSOC);
+          foreach ($fks as $r) {
+              $lines[] = 'F '.$strip($r['sch']).'.'.$r['tbl'].'.'.$r['con'].'('.$r['cols'].')->'.$strip($r['rsch']).'.'.$r['rtbl'].'('.$r['rcols'].') '.$r['ur'].'/'.$r['dr'];
+          }
+          $migrations = $pdo->query("SELECT migration FROM `".$db."`.migrations ORDER BY migration")->fetchAll(PDO::FETCH_COLUMN);
+          foreach ($migrations as $m) { $lines[] = 'M '.$m; }
+          $must = [
+              'I DB.company_users.company_users_user_uuid_index(user_uuid)',
+              'I DB.company_users.company_users_company_uuid_index(company_uuid)',
+              'I DB.company_users.company_users_user_company_idx(user_uuid,company_uuid,deleted_at)',
+              'I DB.companies.companies_owner_uuid_index(owner_uuid)',
+              'F DB.company_users.company_users_user_uuid_foreign(user_uuid)->DB.users(uuid) NO ACTION/NO ACTION',
+              'F DB.company_users.company_users_company_uuid_foreign(company_uuid)->DB.companies(uuid) NO ACTION/NO ACTION',
+              'M 2024_11_28_000001_add_performance_indexes',
+              // R11: the four capacity migrations ran; the surviving column keeps decimal(10,3) unsigned NULL.
+              'M 2026_04_08_000001_add_orchestrator_columns_to_vehicles_table',
+              'M 2026_04_08_000004_add_orchestrator_columns_to_payloads_table',
+              'M 2026_04_14_000001_drop_redundant_capacity_columns_from_payloads_table',
+              'M 2026_04_14_000002_rename_capacity_columns_on_vehicles_table',
+              'C DB.vehicles.payload_capacity_volume decimal(10,3) unsigned null=YES default=NULL coll=-',
+              'C DB.vehicles.payload_capacity_pallets int unsigned null=YES default=NULL coll=-',
+              'C DB.vehicles.payload_capacity_parcels int unsigned null=YES default=NULL coll=-',
+              // Durable anti-replay ledger (gsentsas/fleetops a9655606): table, tenant-scoped key, byte-exact tokens.
+              'M 2026_11_08_000001_create_telematic_webhook_receipts_table',
+              'I DB.telematic_webhook_receipts.PRIMARY(scope_hash,receipt_key) unique',
+              'I DB.telematic_webhook_receipts.telematic_receipt_reconcile_idx(status,lease_expires_at)',
+              'C DB.telematic_webhook_receipts.scope_hash varchar(64) null=NO default=NULL coll=ascii_bin',
+              'C DB.telematic_webhook_receipts.receipt_key varchar(64) null=NO default=NULL coll=ascii_bin',
+              'C DB.telematic_webhook_receipts.claim_token varchar(64) null=NO default=NULL coll=ascii_bin',
+              'C DB.telematic_webhook_receipts.lease_expires_at datetime null=NO default=NULL coll=-',
+              // R12 (gsentsas/storefront b6d59615): uuid stays NOT NULL + UNIQUE with no install-time literal default.
+              'C DB_storefront.catalogs.uuid char(36) null=NO default=NULL coll=utf8mb4_unicode_ci',
+              'C DB_storefront.catalog_category_products.uuid char(36) null=NO default=NULL coll=utf8mb4_unicode_ci',
+              'C DB_storefront.food_trucks.uuid char(36) null=NO default=NULL coll=utf8mb4_unicode_ci',
+              'C DB_storefront.catalog_subjects.uuid char(36) null=NO default=NULL coll=utf8mb4_unicode_ci',
+              'C DB_storefront.catalog_hours.uuid char(36) null=NO default=NULL coll=utf8mb4_unicode_ci',
+              'I DB_storefront.catalogs.catalogs_uuid_unique(uuid) unique',
+              'I DB_storefront.catalog_category_products.catalog_category_products_uuid_unique(uuid) unique',
+              'I DB_storefront.food_trucks.food_trucks_uuid_unique(uuid) unique',
+              'I DB_storefront.catalog_subjects.catalog_subjects_uuid_unique(uuid) unique',
+              'I DB_storefront.catalog_hours.catalog_hours_uuid_unique(uuid) unique',
+          ];
+          $count = static fn (string $p): int => count(array_filter($lines, static fn ($l) => str_starts_with($l, $p)));
+          // The snapshot is written before the assertions so a failing database can still be compared and diagnosed.
+          file_put_contents(getenv('RUNNER_TEMP').'/gst-schema-'.$db.'.txt', implode("\n", $lines)."\n");
+          echo "MYSQL8_SCHEMA=".$db." tables=".$count('T ')." columns=".$count('C ')." indexes=".$count('I ')." foreign_keys=".$count('F ')." migrations=".count($migrations)." sha256=".hash('sha256', implode("\n", $lines))."\n";
+          $failed = 0;
+          foreach ($must as $needle) {
+              if (!in_array($needle, $lines, true)) { fwrite(STDERR, "STOP=MYSQL8_SCHEMA_MISSING:".$needle."\n"); $failed++; }
+          }
+          // Columns dropped by 2026_04_14_* must be gone on a fresh install.
+          foreach (['C DB.vehicles.capacity_weight_kg ', 'C DB.vehicles.capacity_volume_m3 ', 'C DB.payloads.capacity_weight_kg ', 'C DB.payloads.capacity_volume_m3 ', 'C DB.payloads.capacity_pallets ', 'C DB.payloads.capacity_parcels '] as $prefix) {
+              foreach ($lines as $l) {
+                  if (str_starts_with($l, $prefix)) { fwrite(STDERR, "STOP=MYSQL8_STALE_COLUMN:".$l."\n"); $failed++; }
+              }
+          }
+          // R12: a UUID literal as column default is evaluated once per install (non-deterministic, collides on raw inserts).
+          foreach ($lines as $l) {
+              if (str_starts_with($l, 'C ') && preg_match('/ default=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12} /i', $l)) { fwrite(STDERR, "STOP=MYSQL8_LITERAL_UUID_DEFAULT:".$l."\n"); $failed++; }
+          }
+          if (count($migrations) !== count(array_unique($migrations))) { fwrite(STDERR, "STOP=MYSQL8_DUPLICATE_MIGRATION_ROWS\n"); $failed++; }
+          if ($failed > 0) { fwrite(STDERR, "STOP=MYSQL8_SCHEMA_CHECK_FAILED:".$db." failures=".$failed."\n"); exit(2); }
+          echo "MYSQL8_SCHEMA_CHECK=PASS:".$db."\n";
+          PHP
+          # A failed replay stops at once. Every later check (schema assertions, determinism, rerun
+          # idempotence) always runs; failures are collected and the step still ends red.
+          fail=""
+          for db in gst_f8d3_r12_a gst_f8d3_r12_b gst_f8d3_r12_c; do
+            php "$RUNNER_TEMP/gst-schema-check.php" "$db" create
+            if ! DB_DATABASE="$db" php artisan migrate --force --no-interaction --no-ansi > "$RUNNER_TEMP/gst-f8d3-migrate-$db.log" 2>&1; then
+              echo "STOP=LARAVEL12_MYSQL8_MIGRATIONS_FAILED:$db"
+              tail -n 75 "$RUNNER_TEMP/gst-f8d3-migrate-$db.log"
+              exit 2
+            fi
+            echo "LARAVEL12_MYSQL8_MIGRATIONS=PASS:$db"
+            php "$RUNNER_TEMP/gst-schema-check.php" "$db" check || fail="$fail SCHEMA_CHECK:$db"
+          done
+          same=1
+          for db in gst_f8d3_r12_b gst_f8d3_r12_c; do
+            if ! cmp -s "$RUNNER_TEMP/gst-schema-gst_f8d3_r12_a.txt" "$RUNNER_TEMP/gst-schema-$db.txt"; then
+              echo "STOP=MYSQL8_SCHEMA_NOT_DETERMINISTIC:$db"
+              diff "$RUNNER_TEMP/gst-schema-gst_f8d3_r12_a.txt" "$RUNNER_TEMP/gst-schema-$db.txt" | head -n 40
+              same=0
+              fail="$fail NOT_DETERMINISTIC:$db"
+            fi
+          done
+          if [ "$same" = 1 ]; then echo "MYSQL8_SCHEMA_IDENTICAL_ACROSS_3_FRESH_DBS=PASS"; fi
+          cp "$RUNNER_TEMP/gst-schema-gst_f8d3_r12_a.txt" "$RUNNER_TEMP/gst-schema-before-rerun.txt"
+          rerun=1
+          if ! DB_DATABASE=gst_f8d3_r12_a php artisan migrate --force --no-interaction --no-ansi > "$RUNNER_TEMP/gst-f8d3-migrate-rerun.log" 2>&1; then
+            echo "STOP=MYSQL8_MIGRATE_RERUN_FAILED"
+            tail -n 40 "$RUNNER_TEMP/gst-f8d3-migrate-rerun.log"
+            rerun=0
+          fi
+          if ! grep -q "Nothing to migrate" "$RUNNER_TEMP/gst-f8d3-migrate-rerun.log"; then echo "STOP=MYSQL8_MIGRATE_RERUN_NOT_NOOP"; rerun=0; fi
+          php "$RUNNER_TEMP/gst-schema-check.php" gst_f8d3_r12_a check || rerun=0
+          if ! cmp -s "$RUNNER_TEMP/gst-schema-before-rerun.txt" "$RUNNER_TEMP/gst-schema-gst_f8d3_r12_a.txt"; then
+            echo "STOP=MYSQL8_MIGRATE_RERUN_CHANGED_SCHEMA"
+            diff "$RUNNER_TEMP/gst-schema-before-rerun.txt" "$RUNNER_TEMP/gst-schema-gst_f8d3_r12_a.txt" | head -n 40
+            rerun=0
+          fi
+          if [ "$rerun" = 1 ]; then echo "MYSQL8_MIGRATE_RERUN_IDEMPOTENT=PASS"; else fail="$fail RERUN_NOT_IDEMPOTENT"; fi
+          if [ -n "$fail" ]; then echo "STOP=LARAVEL12_MYSQL8_REPLAY_CHECKS_FAILED:$fail"; exit 2; fi
+          echo "LARAVEL12_MYSQL8_MIGRATIONS=PASS_3_FRESH_DBS"
+
+      # The Composer dist of FleetOps excludes /scripts (export-ignore), so the ledger
+      # bench is read from the same pinned commit; no credentials are persisted.
+      # R12: it only needs the installed candidate, so it runs even when an earlier check is red.
+      - name: Fetch FleetOps source at the pinned SHA (read-only, ledger bench only)
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        uses: actions/checkout@v4
+        with:
+          repository: gsentsas/fleetops
+          ref: 665e4fdf16f0344a24a273ebd1599b92ba6c2728
+          path: gst-fleetops-src
+          persist-credentials: false
+
+      - name: Race the real anti-replay ledger on Laravel 12 and the disposable MySQL 8 service
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          src="$GITHUB_WORKSPACE/gst-fleetops-src"
+          test "$(git -C "$src" rev-parse HEAD)" = 665e4fdf16f0344a24a273ebd1599b92ba6c2728
+          # The bench loads the pinned source; it must be byte-identical to what Composer installed.
+          for f in server/src/Support/Telematics/WebhookReplayLedger.php \
+                   server/migrations/2026_11_08_000001_create_telematic_webhook_receipts_table.php; do
+            cmp "$src/$f" "vendor/fleetbase/fleetops-api/$f"
+          done
+          echo "LEDGER_SOURCE_MATCHES_INSTALLED_PACKAGE=PASS"
+          # Creates and drops its own gst_ledger_tmp_* schemas on this job's MySQL service only.
+          rc=0
+          php "$src/scripts/webhook-ledger-race.php" --driver=mysql \
+            --mysql-host=127.0.0.1 --mysql-port=3306 --mysql-user=root \
+            --autoload="$PWD/vendor/autoload.php" > "$RUNNER_TEMP/gst-f8d3-ledger-race-mysql.log" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/gst-f8d3-ledger-race-mysql.log"
+          if [ "$rc" -ne 0 ]; then echo "STOP=LEDGER_RACE_BENCH_FAILED:rc=$rc"; exit 2; fi
+          grep -q '^LARAVEL_VERSION=12\.' "$RUNNER_TEMP/gst-f8d3-ledger-race-mysql.log"
+          grep -qx 'FAILED_CHECKS=NONE' "$RUNNER_TEMP/gst-f8d3-ledger-race-mysql.log"
+          grep -qx 'LEDGER_RACE_BENCH_MYSQL=PASS' "$RUNNER_TEMP/gst-f8d3-ledger-race-mysql.log"
+          echo "LARAVEL12_MYSQL8_ANTI_REPLAY_LEDGER=PASS"
+
+      - name: Upload ONLY diagnostic output (no composer.lock)
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: gst-f8d3-real-forks-solver-logs-NOT-DEPLOYABLE
+          path: |
+            ${{ runner.temp }}/gst-f8d3-real-forks-solver.log
+            ${{ runner.temp }}/gst-f8d3-solver-rc.txt
+            ${{ runner.temp }}/gst-schema-*.txt
+            ${{ runner.temp }}/gst-f8d3-migrate-*.log
+            ${{ runner.temp }}/gst-f8d3-ledger-race-*.log
+          retention-days: 7
+          if-no-files-found: warn
+
+      - name: Upload RC1 Composer lock for review only (NOT DEPLOYABLE)
+        if: ${{ !cancelled() && steps.candidate_audit.outcome == 'success' && steps.install.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: gst-rc1-three-fork-lock-NOT-DEPLOYABLE
+          path: |
+            api/composer.json
+            api/composer.lock
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Prevent release from a compatibility experiment
+        if: ${{ always() }}
+        run: |
+          echo "LARAVEL12_CODE_COMPATIBILITY=UNVERIFIED"
+          echo "RC1_PRODUCTION_DECISION=NO_GO"
+          exit 1
+
+  baseline-security:
+    name: Original dependency security audit (must block)
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    defaults:
+      run:
+        working-directory: api
+    env:
+      COMPOSER_NO_AUDIT: '0'
+    steps:
+      - name: Checkout unmodified original API lock
+        uses: actions/checkout@v4
+      - name: Set up PHP 8.2 and Composer
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          coverage: none
+      - name: Audit original API lock with no exceptions
+        run: composer audit --locked --format=plain
