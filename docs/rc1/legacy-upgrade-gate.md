@@ -84,3 +84,13 @@ The new **read-only** `scripts/rc1-real-backup-metadata-preflight.sh` was execut
 - **Not established by this preflight:** remote B2 snapshot content verification, restoreability of all three databases, data consistency after the Laravel 12 migration, application restart under Laravel 10, full-stack rollback or staging isolation. These remain **NO-GO** release requirements.
 
 Never turn a metadata check or successful backup timer into production approval. Never send genuine backup data to public CI runners.
+
+
+## Encrypted backup pack and three SQL archive integrity — 2026-11-10
+
+The committed **read-only** script `scripts/rc1-real-backup-integrity-preflight.sh` was run via SSH against the private local Restic repository on `mail01`, with **no production MySQL connections or import, no data printed, and no offsite access**. Syntax `bash -n=PASS`, remote exit code `0`.
+
+- `restic --no-lock check --read-data` (low I/O priority, timeout): **all 9 snapshots, all 19 data packs** checked; `no errors were found`.
+- The newest daily snapshot was pinned by immutable snapshot ID, rather than using a moving `latest` selector.
+- The three exports `fleetbase.sql.gz`, `fleetbase_sandbox.sql.gz`, `fleetbase_storefront.sql.gz` were each streamed from **that same snapshot** into `gzip -t`, and all **passed**.
+- Archive integrity is **not** the same as valid SQL or restorable customer data. Importing all three backups into an isolated DB, schema/row integrity and complete application rollback are still **NOT TESTED**. Production remains **NO-GO**.
