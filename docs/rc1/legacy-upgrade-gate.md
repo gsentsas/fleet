@@ -526,3 +526,18 @@ Source inspection: Fleetbase `User` uses UUID as its Eloquent primary key and it
 These checks use actual `auth:sanctum`, `SetupFleetbaseSession`, `AuthorizationGuard`, permission catalog and public/internal route controllers. The earlier `BadMethodCallException` came from synthetic users without `company_users` membership and was resolved in the ephemeral fixture; earlier 401 responses on manually constructed tokens were misleading until `User::createToken` was used.
 
 **Limits:** Admin/no-role matrix is PASS on the candidate in the isolated laboratory only; **read-only, editor, granular Spatie permissions, internal admin writes, other resources, no-company real Sanctum token and full-stack staging upgrade/rollback remain NOT TESTED**. No Core API merge or RC1 composer.lock integration; PR #6 DRAFT, production NO-GO.
+
+
+## RESOLUTION — Real four-profile Sanctum IAM read/editor permission matrix PASS (2026-11-10)
+
+The executable `scripts/rc1-sanctum-four-profile-iam-lab.sh` (commit `422faaaa3d09ad9a774de26b2a6563dd35f2e487`) successfully executed **actual HTTP** across four synthetic user permission profiles: no role/no permissions, reader, editor, and administrator. Exact pinned Laravel12 runtime plus **unmerged Core API security candidate** were tested in the established **fully isolated** networkless Docker lab with Restic-restored disposable MySQL8 (152 tables), private Redis7.4, no exposed ports, memory guard, read-only source and all test data synthetic. Genuine Sanctum tokens were minted using `Fleetbase\\Models\\User::createToken` inside the lab. Spatie permission grants were made **only on the synthetic reader/editor `company_users` records**: reader = `fleet-ops list order` and `fleet-ops view order`; editor = reader permissions plus `fleet-ops update order`. These exact permission names existed in the restored catalog. No production IAM records changed.
+
+**Observed HTTP responses:**
+- Non-admin **no-role**: internal GET/list, GET/own, PUT/own and DELETE/own all **401 permission denied** (Fleetbase's authorization error uses 401); SQL preserved.
+- **Reader**: GET/list **200**, GET/own **200**, GET/foreign tenant order **404**, PUT/own **401**, DELETE/own **401**; SQL unchanged.
+- **Editor**: GET/list **200**, GET/own **200**, GET/foreign tenant order **404**, DELETE/own **401**, PUT/own **200**; disposable SQL confirmed that only the reader/editor company's own fictional order acquired the explicitly expected synthetic note.
+- **Admin**: GET/list **200**, GET/own **200**, GET/foreign **404**. Admin internal PUT/DELETE were **not** exercised in this run.
+- Independent API-key A/B bearer GET own **200** and cross-company **404** remained PASS in the same lab.
+- Assertion markers `RC1_IAM_GRANTS=PASS`, `RC1_IAM_READER_EDITOR_TOKENS=PASS`, `RC1_SANCTUM_ADMIN_NO_ROLE_HTTP_MATRIX=PASS`, **`RC1_SANCTUM_FOUR_PROFILE_IAM=PASS`**, final **exit 0**; no real tokens or client rows printed and temporary containers removed.
+
+**Scope and decision:** `SANCTUM_INTERNAL_ORDER_FOUR_PROFILE_READ_UPDATE_DELETE_AUTHZ=PASS_CANDIDATE`. Coverage is on synthetic orders and specific role permissions in the candidate-only Laravel12 lab; admin authorized writes, permission-catalog omission/empty-set fail-open, absent-company Sanctum real HTTP, broader resource policy, Core API composer pin/CI, dedicated multiservice staging and rollback are **still outstanding**. PR #6 remains DRAFT, production NO-GO.
