@@ -1,6 +1,6 @@
 # GST FLEETBASE — RC1 Laravel 12 / PHP 8.2.35
 
-> **DRAFT — PRODUCTION NO-GO.** Tableau de traçabilité, pas un feu vert de publication. Ce dossier ne contient aucun `composer.lock` approuvé et ne modifie pas les fichiers applicatifs.
+> **DRAFT — PRODUCTION NO-GO.** Tableau de traçabilité, pas un feu vert de publication. `api/composer.json` et `api/composer.lock` sont maintenant commités ensemble **uniquement sur RC1**, à partir du candidat CI audité. Ils ne sont ni fusionnés dans `main` ni validés en staging.
 
 ## Références figées au 10 novembre 2026
 
@@ -35,7 +35,7 @@ Les SHA sont également enregistrés dans [fork-pins.json](fork-pins.json). Ne p
 
 ## Blockers de publication (gates non acquis sur RC1)
 
-1. **Monorepo root non mis à jour** : `api/composer.lock` de `main` reste un lock Laravel 10 avec **21 avis sur 10 paquets et un paquet abandonné** (audit du 09/11). Ne jamais le remplacer par le lock Core isolé S12G ; il faut résoudre puis **committer** le lock réel de l'application Fleetbase sur une branche séparée, avec les trois SHA RC1 épinglés.
+1. **Candidat monorepo versionné sur RC1, pas encore livré** : commit atomique `d7e55a5b6d992ca2f7f141bcf42a50b380e6a17e` comprenant `api/composer.json` (SHA256 `be721c73404b686992d5971abe712ab2c373bd0e4ecc58bfb2d0a2021be5297c`) et `api/composer.lock` (SHA256 `b73196821fe46d45eb8f4f9e2bd6b0df90a2e62d911b8f840c7fc243c94ba453`, 235 runtime / 38 dev). [Run candidat #42792972158](https://github.com/gsentsas/fleet/actions/runs/42792972158) : résolution/audits full+runtime/installation/MySQL/ledger PASS sur artefact éphémère ; **il reste à qualifier la CI sur ce lock commité**. `main` conserve volontairement son ancien lock Laravel10 avec **21 avis sur 10 paquets et 1 abandonné** au contrôle du 09/11, sans aucune dérogation. Ne pas substituer le lock Core isolé S12G.
 2. **Nouveau Core SHA `f81cf74e`** : invalide la stricte équivalence avec la preuve CI centrale R12 et les campagnes S12K–N. Refaire **uniquement les tests affectés et les tests d'intégration pertinents** (Money/Export/TTL, puis ABI/autoload/compatibilité du monorepo). Ne pas annoncer les 209 anciens tests comme nouveaux PASS de cette PR.
 3. **PR FleetOps/Storefront empilées** : conserver la généalogie FleetOps #1→#3→#4 et Storefront #1→#2 ; finaliser vérification code métier, API, IAM/IDOR et anti-rejeu sur l'artefact final.
 4. **Exceptions et risques encore ouverts** : correctifs A15J, 11 exclusions, S12O 80 tests préparés **non exécutés**, audit final sans aucune dérogation ; ne pas masquer un avis Composer, ne pas considérer un workflow d'expérience « exit 1 » comme une CI de publication.
@@ -44,7 +44,7 @@ Les SHA sont également enregistrés dans [fork-pins.json](fork-pins.json). Ne p
 ## Ordre court de livraison
 
 - **RC1A (en cours)** : PR Core #2 ; provenance des changements/traçabilité pin exacte, tests ciblés à passer.
-- **RC1B (à exécuter)** : résoudre le **lock monorepo complet** à partir des trois forks épinglés, auditer strictement, committer le lock sur une branche expérimentale de RC, puis CI sur le SHA final ; aucun mélange avec main.
+- **RC1B (lock COMMITTÉ, CI restante)** : le lock monorepo complet est enregistré dans RC1 au commit `d7e55a5b`; auditer/rejouer les contrôles sur le SHA final de la branche et résoudre uniquement les éventuels blocages ; aucun mélange avec `main`.
 - **RC1C (à exécuter)** : compléter les tests manquants et statuer sur les correctifs historiques restant ; revue des PR empilées.
 - **RC1D (à exécuter)** : staging isolé avec rollback ; présentation d'une décision finale GO/NO-GO.
 
