@@ -250,3 +250,20 @@ On the private host, both pinned runtimes were started in short-lived PHP contai
 - `RC1_L10_QUEUE_WORKER_EMPTY_SYNC_BOOT=PASS`.
 
 **This is only a CLI startup/empty-queue smoke.** It does not establish real Redis queue connectivity, job dispatch and completion, retries, delayed jobs, worker failover or sockets. Those remain **NOT TESTED** and cannot justify production GO.
+
+
+## Real Redis queue job execution on pinned Laravel 12 / Laravel 10 + SocketCluster isolated auth probe — 2026-11-10
+
+**Isolated Redis test:** The already-present `redis:7.4-alpine` image was run in Docker with `--network none`, no published ports, read-only root filesystem, memory 128 MiB and **no persistence**. PHP 8.2 containers with the pinned Laravel12 SHA `31a6a026` and historical Laravel10 SHA `67b2db64` shared only that networkless namespace, used ephemeral storage, and connected to loopback Redis. A tiny PHP script existed only under host `/dev/shm`, mounted read-only, and was removed on exit. Each runtime used `CallQueuedClosure::create` to enqueue a disposable job that only sets a `rc1:job:complete=yes` marker on ephemeral Redis, with no business-data, MySQL or external service access.
+
+- Laravel12: **1 queued job**, `artisan queue:work redis --once --tries=1` exit PASS, **0 queued afterward**, marker confirmed: **`RC1_L12_REAL_REDIS_JOB_PROCESSING=PASS`**.
+- Laravel10: identical end-to-end Redis dispatch/consume/marker assertions: **`RC1_L10_REAL_REDIS_JOB_PROCESSING=PASS`**.
+- The Redis namespace and all temporary PHP/file artifacts were destroyed. Initial probes using unsupportable job types and `php -r` closures were **NO-GO** and not counted as success; the valid test required a source-backed serialized closure. Laravel Redis keys are prefixed, so queue assertions used the actual matching key, not the unprefixed `queues:default`.
+
+**Isolated SocketCluster test:** The existing pinned `fleetbase/fleetbase-socket:v0.7.75` image (ID `sha256:92912305086865ea515d8d74d9795223d7d92df2598c839f804b3cbe4fd78c18`) ran **without network connectivity or published ports**, read-only root filesystem, a 256 MiB memory cap and a throwaway test-only authentication key. The server was configured with `SOCKETCLUSTER_AUTH_ENABLED=true` and `SOCKETCLUSTER_AUTH_MODE=enforce`. Using Node inside the same isolated container:
+
+- `GET /health-check` returned **HTTP 200**.
+- A local WebSocket handshake to `/socketcluster/` succeeded.
+- An anonymous SocketCluster client attempted to subscribe to `user.rc1-no-credentials`. Server response: **subscription denied with reason `no_token`**, `RC1_SOCKET_UNAUTHENTICATED_SUBSCRIBE=PASS`.
+
+**Remaining gaps:** authenticated/tenant-scoped HTTP business flows; Redis retry/failure recovery and real Fleetbase job processing; signed WebSocket token and authorized pub/sub; full-stack concurrent HTTP + queue + socket with rollback and traffic switching on a **dedicated staging host**. These isolated unit-sized integration probes are **not** proof of production multi-service failover. PR #6 remains DRAFT, `PRODUCTION=NO_GO`.
