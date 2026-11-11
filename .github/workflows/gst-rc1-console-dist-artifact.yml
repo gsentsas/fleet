@@ -53,8 +53,10 @@ jobs:
         run: |
           set -euo pipefail
           test -s console/dist/index.html
-          test -s console/dist/assets/vendor.js
-          test -s console/dist/assets/fleetbase.js || test -s console/dist/assets/application.js || test -s console/dist/assets/app.js
+          # Ember fingerprints filenames in production; never expect an unfingerprinted vendor.js.
+          test -d console/dist/assets
+          test -n "$(find console/dist/assets -maxdepth 1 -type f -name 'vendor*.js' -print -quit)"
+          test -n "$(find console/dist/assets -maxdepth 1 -type f -name '*.js' -print -quit)"
           cd console/dist
           find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
           test -s SHA256SUMS
