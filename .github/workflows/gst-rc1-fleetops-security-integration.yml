@@ -7,6 +7,7 @@ on:
       - 'scripts/rc1-fleetops-locked-overlay-proof.sh'
       - 'scripts/rc1-firebase-qa-secret-preflight.sh'
       - 'scripts/rc1-firebase-qa-preflight-contract-test.py'
+      - 'scripts/rc1-firebase-sdk-config-contract.php'
       - 'deploy/compose.firebase.qa.yml'
       - 'docs/rc1-firebase-gsent-it-qa-s37.md'
 permissions:
@@ -36,6 +37,13 @@ jobs:
         run: composer config --global github-oauth.github.com "$GH_JOB_TOKEN"
       - name: Exact committed lock plus pinned FleetOps security overlay
         run: bash scripts/rc1-fleetops-locked-overlay-proof.sh
+      - name: Firebase SDK QA configuration resolution (no credentials)
+        working-directory: api
+        env:
+          GOOGLE_CLOUD_PROJECT: gsent-it
+          FIREBASE_CREDENTIALS: /run/secrets/gst-firebase-qa.json
+          GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/gst-firebase-qa.json
+        run: php ../scripts/rc1-firebase-sdk-config-contract.php
       - name: Real API PHPUnit Unit and Feature after patched FleetOps overlay
         working-directory: api
         env:
