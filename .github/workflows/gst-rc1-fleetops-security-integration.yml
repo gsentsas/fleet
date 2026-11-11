@@ -8,6 +8,9 @@ on:
       - 'api/composer.json'
       - 'api/composer.lock'
       - 'docker/Dockerfile'
+      - 'docker/httpd/vhost.conf'
+      - 'console/nginx.conf'
+      - 'scripts/rc1-s98-r9-proxy-log-safety-proof.py'
       - '.dockerignore'
       - 'scripts/rc1-qa-isolated-recovery-preflight.sh'
       - 'api/tests/Feature/Rc1MySqlQuoteTenantBoundaryTest.php'
@@ -46,6 +49,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Queryless Nginx access logging source gate
+        run: python3 scripts/rc1-s98-r9-proxy-log-safety-proof.py
       - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # verified v2
         with:
           php-version: '8.2.35'
