@@ -230,7 +230,12 @@ class Rc1MySqlQuoteTenantBoundaryTest extends TestCase
             ->where('status_code', '422')
             ->get();
         $this->assertGreaterThan($auditBefore, $conn->table('api_request_logs')->count(), 'S47 real API logging must persist a request record');
-        $this->assertNotEmpty($auditEntries, 'S47 HTTP 422 rejection must appear in real API audit table');
+        // Diagnostic metadata only: never print request bodies, headers, tokens or secrets.
+        $auditMetadata = $conn->table('api_request_logs')
+            ->get(['method', 'path', 'status_code'])
+            ->map(fn ($row) => ['method' => $row->method, 'path' => $row->path, 'status' => $row->status_code])
+            ->toJson();
+        $this->assertNotEmpty($auditEntries, 'S47 HTTP 422 rejection must appear in real API audit table; recorded_metadata=' . $auditMetadata);
         foreach ($httpQueries as $entry) {
             $this->assertDoesNotMatchRegularExpression('/^\\s*(insert\\s+(?:ignore\\s+)?into|replace\\s+into|update|delete\\s+from|truncate\\s+(?:table\\s+)?)[\\s`]*orders\\b/i', $entry['query'], 'S46 HTTP request must not write to orders');
         }
