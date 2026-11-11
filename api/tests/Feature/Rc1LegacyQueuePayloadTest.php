@@ -24,7 +24,7 @@ class Rc1LegacyQueuePayloadTest extends TestCase
         $replayed = unserialize(serialize($old), ['allowed_classes' => true]);
 
         $this->assertInstanceOf(FinalizeApiOrderCreation::class, $replayed);
-        $this->assertNull($replayed->companyUuid);
+        $this->assertFalse((new \ReflectionProperty($replayed, 'companyUuid'))->isInitialized($replayed));
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('Queued order finalization is missing its tenant.');
         $replayed->handle();
@@ -38,7 +38,7 @@ class Rc1LegacyQueuePayloadTest extends TestCase
         $replayed = unserialize(serialize($old), ['allowed_classes' => true]);
 
         $this->assertInstanceOf(FinalizeInternalOrderCreation::class, $replayed);
-        $this->assertNull($replayed->companyUuid);
+        $this->assertFalse((new \ReflectionProperty($replayed, 'companyUuid'))->isInitialized($replayed));
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('Queued order finalization is missing its tenant.');
         $replayed->handle();
