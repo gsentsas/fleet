@@ -14,7 +14,7 @@ assert p['fleetbase/fleetops-api']['source']['reference']=='665e4fdf16f0344a24a2
 print('ORIGINAL_FLEETOPS_COMPOSER_PIN=PASS')
 PY_CHECK
 git clone --quiet --depth 1 --branch security/rc1-service-quote-request-tenant-20261111 https://github.com/gsentsas/fleetops.git /tmp/rc1-fleetops-patch
-test "$(git -C /tmp/rc1-fleetops-patch rev-parse HEAD)" = '8c39b0a99394761470643d2d17ee0a04862188bb'
+test "$(git -C /tmp/rc1-fleetops-patch rev-parse HEAD)" = '36201110ee9abba8f6087c059f48c83462b9e572'
 for file in \
     src/Jobs/FinalizeApiOrderCreation.php \
     src/Jobs/FinalizeInternalOrderCreation.php \
