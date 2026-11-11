@@ -41,6 +41,19 @@ class Rc1MySqlQuoteTenantBoundaryTest extends TestCase
                 }
             });
         }
+        Schema::connection('mysql')->create('activity', function ($table) {
+            $table->string('uuid', 36)->primary();
+            $table->string('log_name')->nullable();
+            $table->text('description')->nullable();
+            $table->string('subject_type')->nullable();
+            $table->string('subject_id')->nullable();
+            $table->string('causer_type')->nullable();
+            $table->string('causer_id')->nullable();
+            $table->json('properties')->nullable();
+            $table->string('event')->nullable();
+            $table->string('batch_uuid')->nullable();
+            $table->timestamps();
+        });
         Schema::connection('mysql')->create('personal_access_tokens', function ($table) {
             $table->bigIncrements('id');
             $table->string('token', 64)->unique();
@@ -97,6 +110,7 @@ class Rc1MySqlQuoteTenantBoundaryTest extends TestCase
                 Schema::connection('mysql')->dropIfExists('service_quotes');
                 Schema::connection('mysql')->dropIfExists('api_credentials');
                 Schema::connection('mysql')->dropIfExists('personal_access_tokens');
+                Schema::connection('mysql')->dropIfExists('activity');
                 foreach (['settings', 'users', 'companies'] as $table) {
                     Schema::connection('mysql')->dropIfExists($table);
                 }
