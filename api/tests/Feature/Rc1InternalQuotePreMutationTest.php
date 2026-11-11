@@ -58,9 +58,38 @@ class Rc1InternalQuotePreMutationTest extends TestCase
         $this->assertNoWrite('22222222-2222-4222-8222-222222222222');
     }
 
-    public function test_internal_foreign_public_id_does_not_create_order(): void
+    public function test_internal_public_id_is_rejected_by_request_validation_before_writes(): void
     {
-        $this->assertNoWrite('quote_BBBBBBBB');
+        // The internal service_quote contract accepts UUIDs, not public IDs.
+        // Unlike a foreign UUID, this identifier is rejected by validation
+        // before the pre-create callback executes.
+        $model = new Rc1InternalOrderWriteProbe();
+        $controller = new OrderController();
+        $controller->model = $model;
+
+        DB::connection('sqlite')->enableQueryLog();
+        DB::connection('sqlite')->flushQueryLog();
+        $error = null;
+        try {
+            $controller->createRecord(Request::create('/int/v1/orders', 'POST', [
+                'order' => [
+                    'order_config_uuid' => 'config-a',
+                    'type' => 'transport',
+                    'payload' => ['type' => 'transport'],
+                    'service_quote' => 'quote_BBBBBBBB',
+                ],
+            ]));
+        } catch (\Illuminate\Validation\ValidationException $exception) {
+            $error = $exception;
+        }
+
+        $this->assertInstanceOf(\Illuminate\Validation\ValidationException::class, $error);
+        $this->assertSame(422, $error->getResponse()?->getStatusCode());
+        $this->assertSame(0, $model->beforeCalls);
+        $this->assertSame(0, $model->writesAttempted);
+        foreach (DB::connection('sqlite')->getQueryLog() as $query) {
+            $this->assertDoesNotMatchRegularExpression('/^(insert|update|delete|replace|create|drop|alter)\b/i', ltrim($query['query']));
+        }
     }
 
     private function assertNoWrite(string $reference): void
