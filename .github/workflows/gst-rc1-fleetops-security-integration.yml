@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/workflows/gst-rc1-fleetops-security-integration.yml'
       - 'scripts/rc1-fleetops-locked-overlay-proof.sh'
+      - 'scripts/rc1-qa-isolated-recovery-preflight.sh'
       - 'api/tests/Feature/Rc1MySqlQuoteTenantBoundaryTest.php'
       - 'api/tests/Feature/Rc1FullSchemaHttpTenantTest.php'
       - 'api/tests/Feature/Rc1*.php'
