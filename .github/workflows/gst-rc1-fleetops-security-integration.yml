@@ -26,11 +26,6 @@ jobs:
           MYSQL_PASSWORD: rc1_ci_ephemeral_only
         ports:
           - 3306:3306
-        options: >-
-          --health-cmd='mysqladmin ping -h 127.0.0.1 --silent'
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=20
     env:
       COMPOSER_NO_INTERACTION: '1'
       COMPOSER_PROCESS_TIMEOUT: '600'
@@ -81,6 +76,7 @@ jobs:
         run: |
           set -euo pipefail
           export APP_KEY="$(php -r 'echo "base64:".base64_encode(random_bytes(32));')"
+          php -r '$ok=false; for ($i=0; $i<30; $i++) { try { $p = new PDO("mysql:host=127.0.0.1;port=3306;dbname=rc1_ci_tenant", "rc1_ci", "rc1_ci_ephemeral_only", [PDO::ATTR_TIMEOUT => 2]); $ok=true; break; } catch (PDOException $e) { sleep(2); } } if (!$ok) { fwrite(STDERR, "STOP=EPHEMERAL_MYSQL_NOT_READY\n"); exit(2); } echo "RC1_EPHEMERAL_MYSQL_READY=PASS\n";'
           vendor/bin/phpunit -c phpunit.xml --colors=never tests/Feature/Rc1MySqlQuoteTenantBoundaryTest.php
           echo RC1_REAL_MYSQL_SERVICE_QUOTE_TENANT=PASS
       - name: Real API PHPUnit Unit and Feature after patched FleetOps overlay
