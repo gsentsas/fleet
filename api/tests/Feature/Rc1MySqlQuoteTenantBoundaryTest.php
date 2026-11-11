@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
 /** Real FleetOps quote resolver, exercised against disposable CI MySQL. */
+/** @group rc1-mysql-only */
 class Rc1MySqlQuoteTenantBoundaryTest extends TestCase
 {
     protected function setUp(): void

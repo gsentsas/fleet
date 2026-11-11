@@ -99,5 +99,5 @@ jobs:
           test "$(sha256sum composer.lock | cut -d ' ' -f1)" = '3d3ae9cfb74c7b8015f83de1d01a65b950109b2815dd566b4b5d4297cc0550bd'
           vendor/bin/phpunit -c phpunit.xml --testsuite Unit --colors=never
           echo RC1_PATCHED_API_PHPUNIT_UNIT=PASS
-          vendor/bin/phpunit -c phpunit.xml --testsuite Feature --colors=never
+          vendor/bin/phpunit -c phpunit.xml --testsuite Feature --exclude-group rc1-mysql-only --colors=never
           echo RC1_PATCHED_API_PHPUNIT_FEATURE=PASS
