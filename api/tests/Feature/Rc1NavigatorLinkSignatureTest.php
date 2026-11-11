@@ -2,90 +2,42 @@
 
 namespace Tests\Feature;
 
-use Fleetbase\FleetOps\Http\Controllers\Internal\v1\NavigatorController;
-use Illuminate\Http\Request;
-use ReflectionMethod;
 use Tests\TestCase;
 
-/**
- * S75: Exercises the real Navigator HMAC validator without invoking linkApp(),
- * provisioning credentials, creating tenants, or contacting external services.
- *
- * A valid link is currently a reusable bearer token: this suite intentionally
- * does NOT assert replay prevention or tenant/device binding, which are absent
- * from the current implementation and require an explicit release decision.
- */
+/** Legacy HMAC links fail closed. Stateful security runs on dedicated MySQL. */
 class Rc1NavigatorLinkSignatureTest extends TestCase
 {
-    private const SYNTHETIC_TEST_APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
-
-    protected function setUp(): void
+    private function reject(string $query): void
     {
-        parent::setUp();
-
-        // Synthetic test-only key. Never read or expose runtime QA/prod keys.
-        config(['app.key' => self::SYNTHETIC_TEST_APP_KEY]);
+        $controller = new \Fleetbase\FleetOps\Http\Controllers\Internal\v1\NavigatorController();
+        $response = $controller->linkApp(\Illuminate\Http\Request::create('/navigator/link-app' . $query));
+        self::assertSame(403, $response->getStatusCode());
     }
 
-    private function validatorAccepts(int|string|null $expires, ?string $signature): bool
+    public function test_missing_token_is_rejected(): void
     {
-        $query = [];
-
-        if ($expires !== null) {
-            $query['expires'] = $expires;
-        }
-
-        if ($signature !== null) {
-            $query['signature'] = $signature;
-        }
-
-        $method = new ReflectionMethod(NavigatorController::class, 'hasValidLinkSignature');
-
-        return $method->invoke(
-            (new \ReflectionClass(NavigatorController::class))->newInstanceWithoutConstructor(),
-            Request::create('/int/v1/fleet-ops/navigator/link-app', 'GET', $query)
-        );
+        $this->reject('');
     }
 
-    public function test_missing_signature_or_expiry_is_rejected(): void
+    public function test_legacy_expiry_and_signature_are_rejected(): void
     {
-        $this->assertFalse($this->validatorAccepts(null, null));
-        $this->assertFalse($this->validatorAccepts(time() + 60, null));
-        $this->assertFalse($this->validatorAccepts(time() + 60, ''));
-        $this->assertFalse($this->validatorAccepts(null, str_repeat('0', 64)));
+        $this->reject('?expires=' . (time() + 60) . '&signature=' . str_repeat('0', 64));
     }
 
-    public function test_expired_link_is_rejected_with_real_controller_validator(): void
+    public function test_old_hmac_validator_is_not_available(): void
     {
-        $expired = time() - 60;
-        $signature = NavigatorController::linkSignature($expired);
-
-        $this->assertFalse($this->validatorAccepts($expired, $signature));
+        self::assertFalse(method_exists(\Fleetbase\FleetOps\Http\Controllers\Internal\v1\NavigatorController::class, 'hasValidLinkSignature'));
+        self::assertFalse(method_exists(\Fleetbase\FleetOps\Http\Controllers\Internal\v1\NavigatorController::class, 'linkSignature'));
     }
 
-    public function test_forged_signature_is_rejected(): void
+    public function test_array_token_is_rejected(): void
     {
-        $expires = time() + 120;
-
-        $this->assertFalse($this->validatorAccepts($expires, str_repeat('0', 64)));
-        $this->assertFalse($this->validatorAccepts($expires, 'invalid-signature'));
+        $this->reject('?token[]=value');
     }
 
-    public function test_expiry_tampering_invalidates_a_real_signed_link(): void
+    public function test_anonymous_issuance_is_rejected(): void
     {
-        $expires = time() + 120;
-        $signature = NavigatorController::linkSignature($expires);
-
-        $this->assertFalse($this->validatorAccepts($expires + 60, $signature));
-        $this->assertFalse($this->validatorAccepts($expires - 60, $signature));
-    }
-
-    public function test_valid_short_lived_signature_is_accepted_by_validator_only(): void
-    {
-        $expires = time() + 120;
-        $signature = NavigatorController::linkSignature($expires);
-
-        $this->assertSame(64, strlen($signature));
-        $this->assertTrue($this->validatorAccepts($expires, $signature));
+        $response = (new \Fleetbase\FleetOps\Http\Controllers\Internal\v1\NavigatorController())->getLinkAppUrl();
+        self::assertSame(403, $response->getStatusCode());
     }
 }

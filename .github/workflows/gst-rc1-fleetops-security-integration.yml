@@ -5,6 +5,10 @@ on:
     paths:
       - '.github/workflows/gst-rc1-fleetops-security-integration.yml'
       - 'scripts/rc1-fleetops-locked-overlay-proof.sh'
+      - 'api/composer.json'
+      - 'api/composer.lock'
+      - 'docker/Dockerfile'
+      - '.dockerignore'
       - 'scripts/rc1-qa-isolated-recovery-preflight.sh'
       - 'api/tests/Feature/Rc1MySqlQuoteTenantBoundaryTest.php'
       - 'api/tests/Feature/Rc1FullSchemaHttpTenantTest.php'
@@ -23,11 +27,11 @@ jobs:
     timeout-minutes: 30
     services:
       redis:
-        image: redis:7-alpine
+        image: redis@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f
         ports:
           - 6379:6379
       mysql:
-        image: mysql:8.0
+        image: mysql@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b
         env:
           MYSQL_ROOT_PASSWORD: rc1_ci_ephemeral_only
           MYSQL_DATABASE: rc1_ci_tenant
@@ -39,13 +43,13 @@ jobs:
       COMPOSER_NO_INTERACTION: '1'
       COMPOSER_PROCESS_TIMEOUT: '600'
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: shivammathur/setup-php@v2
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # verified v2
         with:
-          php-version: '8.2'
-          extensions: mbstring, xml, gd, zip, pdo_mysql, pdo_sqlite, sqlite3, intl, bcmath, gmp
+          php-version: '8.2.35'
+          extensions: mbstring, xml, gd, zip, pcntl, pdo_mysql, pdo_sqlite, sqlite3, intl, bcmath, gmp
           coverage: none
       - name: Synthetic Firebase QA preflight contract (no secrets, no Docker)
         run: python3 scripts/rc1-firebase-qa-preflight-contract-test.py
@@ -86,8 +90,9 @@ jobs:
           TELESCOPE_ENABLED: 'false'
         run: |
           set -euo pipefail
-          export APP_KEY="$(php -r 'echo "base64:".base64_encode(random_bytes(32));')"
-          php -r '$ok=false; for ($i=0; $i<30; $i++) { try { $p = new PDO("mysql:host=127.0.0.1;port=3306;dbname=rc1_ci_tenant", "rc1_ci", "rc1_ci_ephemeral_only", [PDO::ATTR_TIMEOUT => 2]); $ok=true; break; } catch (PDOException $e) { sleep(2); } } if (!$ok) { fwrite(STDERR, "STOP=EPHEMERAL_MYSQL_NOT_READY\n"); exit(2); } echo "RC1_EPHEMERAL_MYSQL_READY=PASS\n";'
+          APP_KEY="$(php -r 'echo "base64:".base64_encode(random_bytes(32));')"
+          export APP_KEY
+          php ../scripts/rc1-ci-mysql-ready.php
           vendor/bin/phpunit -c phpunit.xml --colors=never tests/Feature/Rc1MySqlQuoteTenantBoundaryTest.php
           echo RC1_REAL_MYSQL_SERVICE_QUOTE_TENANT=PASS
       - name: Real API PHPUnit Unit and Feature after patched FleetOps overlay
@@ -106,8 +111,9 @@ jobs:
           TELESCOPE_ENABLED: 'false'
         run: |
           set -euo pipefail
-          export APP_KEY="$(php -r 'echo "base64:".base64_encode(random_bytes(32));')"
-          test "$(sha256sum composer.lock | cut -d ' ' -f1)" = '3d3ae9cfb74c7b8015f83de1d01a65b950109b2815dd566b4b5d4297cc0550bd'
+          APP_KEY="$(php -r 'echo "base64:".base64_encode(random_bytes(32));')"
+          export APP_KEY
+          test "$(sha256sum composer.lock | cut -d ' ' -f1)" = '77e93ea7273e80891a8c165cd6d4b56ef7a8615dab2b0b9152875aac290de5c5'
           vendor/bin/phpunit -c phpunit.xml --testsuite Unit --colors=never
           echo RC1_PATCHED_API_PHPUNIT_UNIT=PASS
           vendor/bin/phpunit -c phpunit.xml --testsuite Feature --exclude-group rc1-mysql-only --colors=never --display-phpunit-deprecations
@@ -137,11 +143,14 @@ jobs:
           test "${{ github.event_name }}" = "pull_request"
           test "$DB_DATABASE" = "rc1_ci_schema"
           test "$APP_ENV" = "testing"
-          export APP_KEY="$(php -r 'echo "base64:".base64_encode(random_bytes(32));')"
-          php -r '$pdo=new PDO("mysql:host=127.0.0.1;port=3306", "root", "rc1_ci_ephemeral_only", [PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION]); $pdo->exec("CREATE DATABASE rc1_ci_schema CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"); $pdo->exec("CREATE DATABASE rc1_ci_schema_storefront CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"); $pdo->exec("CREATE DATABASE rc1_ci_schema_sandbox CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"); echo "S48_FRESH_DISPOSABLE_SCHEMA=PASS\n";'
+          APP_KEY="$(php -r 'echo "base64:".base64_encode(random_bytes(32));')"
+          export APP_KEY
+          php ../scripts/rc1-ci-create-schemas.php
           php artisan migrate --force --no-interaction
           php artisan migrate:status --no-interaction
           echo S48_FULL_MIGRATION_REPLAY=PASS
           echo S49_FULL_SCHEMA_HTTP_GATE=START
           RC1_FULL_SCHEMA_MYSQL=1 vendor/bin/phpunit -c phpunit.xml --colors=never tests/Feature/Rc1FullSchemaHttpTenantTest.php
           echo S49_FULL_SCHEMA_HTTP_GATE=PASS
+          RC1_NAVIGATOR_MYSQL=1 RESPONSE_CACHE_DRIVER=array vendor/bin/phpunit -c phpunit.xml --colors=never tests/Feature/Rc1NavigatorMySqlTest.php
+          echo S92_REAL_MYSQL_NAVIGATOR_SECURITY=PASS

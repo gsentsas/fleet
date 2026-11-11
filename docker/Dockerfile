@@ -3,14 +3,12 @@
 # laravel/octane sets a minimum FrankenPHP version and enforces it at startup, so this tag and the
 # Octane range in api/composer.json move together. The build fails below when they don't match.
 # 1.13.2 ships PHP 8.2.35, which fixes PHP2Shell (CVE-2026-109618, CVE-2026-109619). Don't go below it.
-FROM dunglas/frankenphp:1.13.2-php8.2-bookworm AS base
+FROM dunglas/frankenphp:1.13.2-php8.2-bookworm@sha256:9b47af8f826a910e3ede5cc77fa82d969b2dd3b2cd0397d981b5156c3bff77a4 AS base
 
 # Install packages
 # default-mysql-client provides mysqldump (MariaDB's), which db:backup runs. Without it every
 # backup failed; the old command hid that and uploaded empty 20-byte gzip files.
-RUN apt-get update && apt-get install -y git bind9-utils mycli default-mysql-client nodejs npm nano uuid-runtime \
-  && mkdir -p /root/.ssh \
-  && ssh-keyscan github.com >> /root/.ssh/known_hosts
+RUN apt-get update && apt-get install -y git bind9-utils mycli default-mysql-client nodejs npm nano uuid-runtime
 
 # Install PHP Extensions
 RUN install-php-extensions \
@@ -70,7 +68,7 @@ RUN sed -e 's/^expose_php.*/expose_php = Off/' "$PHP_INI_DIR/php.ini-production"
 RUN npm install -g chokidar pnpm ember-cli npm-cli-login
 
 # Install ssm-parent
-COPY --from=ghcr.io/springload/ssm-parent:1.8 /usr/bin/ssm-parent /sbin/ssm-parent
+COPY --from=ghcr.io/springload/ssm-parent:1.8@sha256:c3bfb721bf050ed1ef58d175e7b9fbe9f9cd4c2810db66636a13b5519168928f /usr/bin/ssm-parent /sbin/ssm-parent
 
 # Create the pnpm directory and set the PNPM_HOME environment variable
 RUN mkdir -p ~/.pnpm
@@ -97,9 +95,6 @@ ENV FLEETBASE_VERSION=0.7.75
 ARG ENVIRONMENT=production
 ENV APP_ENV=$ENVIRONMENT
 
-# Setup github auth
-ARG GITHUB_AUTH_KEY
-
 # Copy Caddyfile
 COPY --chown=www-data:www-data ./Caddyfile $CADDYFILE_PATH
 
@@ -116,9 +111,6 @@ RUN export FLEETBASE_INSTANCE_ID=$(cat /fleetbase/api/.fleetbase-id) && \
 # Set working directory
 WORKDIR /fleetbase/api
 
-# If GITHUB_AUTH_KEY is provided, create auth.json with it
-RUN if [ -n "$GITHUB_AUTH_KEY" ]; then echo "{\"github-oauth\": {\"github.com\": \"$GITHUB_AUTH_KEY\"}}" > auth.json; fi
-
 # Prepare composer cache directory
 RUN mkdir -p /var/www/.cache/composer && chown -R www-data:www-data /var/www/.cache/composer
 
@@ -126,7 +118,8 @@ RUN mkdir -p /var/www/.cache/composer && chown -R www-data:www-data /var/www/.ca
 COPY --chown=www-data:www-data ./api/composer.json ./api/composer.lock /fleetbase/api/
 
 # Pre-install Composer dependencies
-RUN su www-data -s /bin/sh -c "composer install --no-scripts --optimize-autoloader --no-dev --no-cache"
+RUN --mount=type=secret,id=composer_auth,target=/run/secrets/composer_auth,uid=33,gid=33,mode=0400 \
+  su www-data -s /bin/sh -c 'if [ -f /run/secrets/composer_auth ]; then export COMPOSER_AUTH="$(cat /run/secrets/composer_auth)"; fi; composer install --no-interaction --no-scripts --no-plugins --optimize-autoloader --no-dev --no-cache'
 
 # Fail the build if this image's FrankenPHP is older than the installed Octane requires. Octane would
 # otherwise delete the binary on startup and every app container would exit 127.

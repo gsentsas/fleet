@@ -10,7 +10,6 @@ concurrency:
 
 env:
   PROJECT: ${{ secrets.PROJECT }}
-  GITHUB_AUTH_KEY: ${{ secrets._GITHUB_AUTH_TOKEN }}
 
 jobs:
   setup:
@@ -23,32 +22,32 @@ jobs:
         id: extract-env
         run: |
           ENVIRONMENT=$(echo "${{ github.ref_name }}" | sed 's|deploy/||')
-          echo "environment=${ENVIRONMENT}" >> $GITHUB_OUTPUT
+          echo "environment=${ENVIRONMENT}" >> "$GITHUB_OUTPUT"
           echo "Deploying to environment: ${ENVIRONMENT}"
 
   build_service:
     name: Build and Deploy the Service
     needs: [setup]
     runs-on: ubuntu-latest
-    environment: ${{ needs.setup.outputs.environment }} 
+    environment: ${{ needs.setup.outputs.environment }}
     permissions:
       id-token: write # This is required for requesting the JWT
       contents: read # This is required for actions/checkout
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Set Dynamic ENV Vars
         run: |
-          SHORT_COMMIT=$(echo $GITHUB_SHA | cut -c -8)
-          echo "VERSION=${SHORT_COMMIT}" >> $GITHUB_ENV
-          echo "STACK=$(basename $GITHUB_REF)" >> $GITHUB_ENV
+          SHORT_COMMIT=$(echo "$GITHUB_SHA" | cut -c -8)
+          echo "VERSION=${SHORT_COMMIT}" >> "$GITHUB_ENV"
+          echo "STACK=$(basename "$GITHUB_REF")" >> "$GITHUB_ENV"
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -66,7 +65,7 @@ jobs:
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}/${{ env.PROJECT }}-${{ env.STACK }}
           VERSION: ${{ env.VERSION }}
-          GITHUB_AUTH_KEY: ${{ env.GITHUB_AUTH_KEY }}
+          COMPOSER_AUTH: '{"github-oauth":{"github.com":"${{ secrets._GITHUB_AUTH_TOKEN || github.token }}"}}'
           CACHE: type=gha
         with:
           push: true
@@ -97,7 +96,7 @@ jobs:
           SCHEDULER_SERVICE="${SERVICE_PREFIX}scheduler"
           EVENTS_SERVICE="${SERVICE_PREFIX}events"
           TASK_DEF="${PROJECT}-${STACK}-${SERVICE_BASE}"
-          
+
           # Get container name from task definition
           CONTAINER_NAME="$(aws ecs describe-task-definition --task-definition "$TASK_DEF" \
               --query 'taskDefinition.containerDefinitions[0].name' --output text 2>/dev/null || echo "$SERVICE_BASE")"
@@ -117,7 +116,7 @@ jobs:
       - name: Deploy the images 🚀
         run: |-
           set -eu
-          
+
           # Run deploy.sh script before deployments
           env "ECS_RUN.SERVICE=${API_SERVICE}" "ECS_RUN.LAUNCH_TYPE=FARGATE" \
             ./ecs-tool run -l "ecs-tool" \
@@ -144,18 +143,18 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
 
       - name: Set Dynamic ENV Vars
         run: |
-          SHORT_COMMIT=$(echo $GITHUB_SHA | cut -c -8)
-          echo "VERSION=${SHORT_COMMIT}" >> $GITHUB_ENV
-          echo "STACK=$(basename $GITHUB_REF)" >> $GITHUB_ENV
+          SHORT_COMMIT=$(echo "$GITHUB_SHA" | cut -c -8)
+          echo "VERSION=${SHORT_COMMIT}" >> "$GITHUB_ENV"
+          echo "STACK=$(basename "$GITHUB_REF")" >> "$GITHUB_ENV"
 
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v2
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_NUMBER }}:role/${{ env.PROJECT }}-${{ env.STACK }}-deployer
           role-session-name: github
@@ -169,10 +168,10 @@ jobs:
 
           ./ssm-parent -n /actions/${{ env.PROJECT }}/${{ env.STACK }}/configuration dotenv /tmp/dotenv.file
           # remove double quotes and pipe into the env
-          cat /tmp/dotenv.file | sed -e 's/"//g' >> $GITHUB_ENV
+          sed -e 's/"//g' /tmp/dotenv.file >> "$GITHUB_ENV"
 
       - name: Install Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
 
@@ -187,9 +186,9 @@ jobs:
         id: pnpm-cache
         shell: bash
         run: |
-          echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
+          echo "STORE_PATH=$(pnpm store path)" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/cache@v3
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         name: Setup pnpm Cache
         with:
           path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
@@ -210,18 +209,20 @@ jobs:
 
       - name: Set Env Variables
         run: |
-          # ensure file ends with a newline
-          printf '\n' >> ./environments/.env.production
-          
-          echo "EXTENSIONS=${{ secrets.EXTENSIONS }}" >> ./environments/.env.production
-          echo "LOGROCKET_APP_ID=${{ secrets.LOGROCKET_APP_ID }}" >> ./environments/.env.production
-          echo "STRIPE_KEY=${{ secrets.STRIPE_KEY }}" >> ./environments/.env.production
-          echo "STRIPE_PRICE_LICENSE_ANNUAL_ID=${{ secrets.STRIPE_PRICE_LICENSE_ANNUAL_ID }}" >> ./environments/.env.production
-          echo "STRIPE_PRICE_LICENSE_MONTHLY_ID=${{ secrets.STRIPE_PRICE_LICENSE_MONTHLY_ID }}" >> ./environments/.env.production
-          echo "STRIPE_PRICE_LICENSE_MAJOR_ID=${{ secrets.STRIPE_PRICE_LICENSE_MAJOR_ID }}" >> ./environments/.env.production
-          echo "STRIPE_PRICE_LICENSE_MINOR_ID=${{ secrets.STRIPE_PRICE_LICENSE_MINOR_ID }}" >> ./environments/.env.production
-          echo "STRIPE_PRICE_INSTALLATION_FULL_ID=${{ secrets.STRIPE_PRICE_INSTALLATION_FULL_ID }}" >> ./environments/.env.production
-          echo "STRIPE_PRICE_INSTALLATION_ASSISTED_ID=${{ secrets.STRIPE_PRICE_INSTALLATION_ASSISTED_ID }}" >> ./environments/.env.production
+          {
+            # ensure file ends with a newline
+            printf '\n'
+
+            echo "EXTENSIONS=${{ secrets.EXTENSIONS }}"
+            echo "LOGROCKET_APP_ID=${{ secrets.LOGROCKET_APP_ID }}"
+            echo "STRIPE_KEY=${{ secrets.STRIPE_KEY }}"
+            echo "STRIPE_PRICE_LICENSE_ANNUAL_ID=${{ secrets.STRIPE_PRICE_LICENSE_ANNUAL_ID }}"
+            echo "STRIPE_PRICE_LICENSE_MONTHLY_ID=${{ secrets.STRIPE_PRICE_LICENSE_MONTHLY_ID }}"
+            echo "STRIPE_PRICE_LICENSE_MAJOR_ID=${{ secrets.STRIPE_PRICE_LICENSE_MAJOR_ID }}"
+            echo "STRIPE_PRICE_LICENSE_MINOR_ID=${{ secrets.STRIPE_PRICE_LICENSE_MINOR_ID }}"
+            echo "STRIPE_PRICE_INSTALLATION_FULL_ID=${{ secrets.STRIPE_PRICE_INSTALLATION_FULL_ID }}"
+            echo "STRIPE_PRICE_INSTALLATION_ASSISTED_ID=${{ secrets.STRIPE_PRICE_INSTALLATION_ASSISTED_ID }}"
+          } >> ./environments/.env.production
         working-directory: ./console
 
       - name: Install dependencies
@@ -248,4 +249,4 @@ jobs:
           # this value will come from the dotenv above
           echo "Deploying to $DEPLOY_BUCKET"
           wget -O- https://github.com/bep/s3deploy/releases/download/v2.11.0/s3deploy_2.11.0_linux-amd64.tar.gz | tar xzv -f - s3deploy
-          ./s3deploy -region ${AWS_REGION} -source console/dist -bucket ${DEPLOY_BUCKET}
+          ./s3deploy -region "${AWS_REGION}" -source console/dist -bucket "${DEPLOY_BUCKET}"

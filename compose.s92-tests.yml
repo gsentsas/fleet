@@ -1,0 +1,46 @@
+name: gst-s92-security
+services:
+  mysql:
+    image: mysql@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b
+    environment:
+      MYSQL_ROOT_PASSWORD: s92_disposable_local_only
+    tmpfs:
+      - /var/lib/mysql
+    networks: [lab]
+    healthcheck:
+      test: [CMD-SHELL, 'MYSQL_PWD="$$MYSQL_ROOT_PASSWORD" mysql -h 127.0.0.1 -uroot -e "SELECT 1" >/dev/null']
+      interval: 2s
+      timeout: 2s
+      retries: 60
+  tests:
+    image: gst-s92-php8235-mysql:local
+    working_dir: /fleetbase/api
+    entrypoint: [php]
+    environment:
+      APP_ENV: testing
+      APP_KEY: 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+      APP_URL: https://fleetbase.test
+      DB_CONNECTION: mysql
+      DB_HOST: mysql
+      DB_DATABASE: rc1_ci_schema
+      DB_USERNAME: root
+      DB_PASSWORD: s92_disposable_local_only
+      CACHE_STORE: array
+      CACHE_DRIVER: array
+      RESPONSE_CACHE_DRIVER: array
+      SESSION_DRIVER: array
+      QUEUE_CONNECTION: sync
+      MAIL_MAILER: array
+      LOG_CHANNEL: stderr
+      TELESCOPE_ENABLED: 'false'
+      RC1_NAVIGATOR_MYSQL: '1'
+    volumes:
+      - .:/fleetbase
+      - ../s92-fleetops:/sources/fleetops:ro
+      - ../s92-core-api:/sources/core-api:ro
+    networks: [lab]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+networks:
+  lab:
+    internal: true

@@ -3,7 +3,7 @@ variable "REGISTRY" { default = "" }
 variable "VERSION" { default = "latest" }
 variable "CACHE" { default = "" }
 variable "GCP" { default = false }
-variable "GITHUB_AUTH_KEY" { default = "" }
+variable "COMPOSER_AUTH" { default = "" }
 
 group "default" {
   targets = ["app", "app-httpd"]
@@ -41,9 +41,7 @@ target "app" {
     ) : []
   ) : []
 
-  args = {
-    GITHUB_AUTH_KEY = "${GITHUB_AUTH_KEY}"
-  }
+  secret = notequal("", COMPOSER_AUTH) ? ["id=composer_auth,env=COMPOSER_AUTH"] : []
 
   cache-from = notequal("", CACHE) ? ["${CACHE}"] : []
   cache-to   = notequal("", CACHE) ? ["${CACHE},mode=max,ignore-error=true"] : []
@@ -75,6 +73,7 @@ target "fleetbase-api" {
   context    = "./"
   dockerfile = "docker/Dockerfile"
   target     = "app-release"
+  secret     = notequal("", COMPOSER_AUTH) ? ["id=composer_auth,env=COMPOSER_AUTH"] : []
   platforms  = ["linux/amd64", "linux/arm64"]
 
   tags = notequal("", REGISTRY) ? formatlist(

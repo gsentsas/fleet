@@ -65,7 +65,7 @@ jobs:
 
       - name: Require Composer authentication
         env:
-          COMPOSER_AUTH_TOKEN: ${{ secrets._GITHUB_AUTH_TOKEN }}
+          COMPOSER_AUTH_TOKEN: ${{ secrets._GITHUB_AUTH_TOKEN || github.token }}
         run: |
           if [[ -z "$COMPOSER_AUTH_TOKEN" ]]; then
             echo "_GITHUB_AUTH_TOKEN is required to resolve Fleetbase Composer dependencies" >&2
@@ -82,12 +82,12 @@ jobs:
 
       - name: Build release API image
         env:
-          COMPOSER_AUTH_TOKEN: ${{ secrets._GITHUB_AUTH_TOKEN }}
+          COMPOSER_AUTH: '{"github-oauth":{"github.com":"${{ secrets._GITHUB_AUTH_TOKEN || github.token }}"}}'
         run: |
           docker build \
             --file docker/Dockerfile \
             --target app-release \
-            --build-arg GITHUB_AUTH_KEY="$COMPOSER_AUTH_TOKEN" \
+            --secret id=composer_auth,env=COMPOSER_AUTH \
             --tag fleetbase/fleetbase-api:erd \
             .
           docker tag fleetbase/fleetbase-api:erd fleetbase/fleetbase-api:latest

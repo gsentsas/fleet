@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "3ddaa141bed047f2412da4e19d626b17",
+    "content-hash": "1716b62cacf701b2965c4fa2a6dd17b7",
     "packages": [
         {
             "name": "aaronfrancis/fast-paginate",
@@ -2136,13 +2136,13 @@
             "version": "dev-security/rc1-fail-closed-tenant-lookup-20261110",
             "source": {
                 "type": "git",
-                "url": "https://github.com/gsentsas/core-api",
-                "reference": "e2076d396af95dbe77823f670cd50d4f12671e0c"
+                "url": "https://github.com/gsentsas/core-api.git",
+                "reference": "4235a8661e1b08ff448db86d0eaedb76e3162739"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/gsentsas/core-api/zipball/e2076d396af95dbe77823f670cd50d4f12671e0c",
-                "reference": "e2076d396af95dbe77823f670cd50d4f12671e0c",
+                "url": "https://api.github.com/repos/gsentsas/core-api/zipball/4235a8661e1b08ff448db86d0eaedb76e3162739",
+                "reference": "4235a8661e1b08ff448db86d0eaedb76e3162739",
                 "shasum": ""
             },
             "require": {
@@ -2279,7 +2279,10 @@
                 "fleetbase",
                 "logistics platform"
             ],
-            "time": "2026-11-10T22:20:16+00:00"
+            "support": {
+                "source": "https://github.com/gsentsas/core-api/tree/security/rc1-fail-closed-tenant-lookup-20261110"
+            },
+            "time": "2026-11-11T22:02:20+00:00"
         },
         {
             "name": "fleetbase/countries",
@@ -2418,16 +2421,16 @@
         },
         {
             "name": "fleetbase/fleetops-api",
-            "version": "dev-compat/p0-f8d3-r11-unsigned-decimal",
+            "version": "dev-security/rc1-navigator-tenant-link-s85-20261111",
             "source": {
                 "type": "git",
                 "url": "https://github.com/gsentsas/fleetops.git",
-                "reference": "665e4fdf16f0344a24a273ebd1599b92ba6c2728"
+                "reference": "7f5a82f2d4be87f52bd5729e39384867af21345a"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/gsentsas/fleetops/zipball/665e4fdf16f0344a24a273ebd1599b92ba6c2728",
-                "reference": "665e4fdf16f0344a24a273ebd1599b92ba6c2728",
+                "url": "https://api.github.com/repos/gsentsas/fleetops/zipball/7f5a82f2d4be87f52bd5729e39384867af21345a",
+                "reference": "7f5a82f2d4be87f52bd5729e39384867af21345a",
                 "shasum": ""
             },
             "require": {
@@ -2544,9 +2547,9 @@
                 "tms"
             ],
             "support": {
-                "source": "https://github.com/gsentsas/fleetops/tree/compat/p0-f8d3-r11-unsigned-decimal"
+                "source": "https://github.com/gsentsas/fleetops/tree/security/rc1-navigator-tenant-link-s85-20261111"
             },
-            "time": "2026-11-09T08:15:45+00:00"
+            "time": "2026-11-11T22:02:21+00:00"
         },
         {
             "name": "fleetbase/laravel-mysql-spatial",
@@ -19825,7 +19828,7 @@
         },
         {
             "package": "fleetbase/fleetops-api",
-            "version": "dev-compat/p0-f8d3-r11-unsigned-decimal",
+            "version": "dev-security/rc1-navigator-tenant-link-s85-20261111",
             "alias": "0.6.75",
             "alias_normalized": "0.6.75.0"
         },
