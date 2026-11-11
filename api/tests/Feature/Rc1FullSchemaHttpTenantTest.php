@@ -59,6 +59,7 @@ class Rc1FullSchemaHttpTenantTest extends TestCase
         $db->table('service_quotes')->insert([
             'uuid' => self::QUOTE_B,
             'public_id' => 'quote_S49_FOREIGN',
+            'amount' => 100,
             'company_uuid' => self::COMPANY_B,
         ]);
     }
