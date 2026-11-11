@@ -73,6 +73,12 @@ class Rc1MySqlQuoteTenantBoundaryTest extends TestCase
             $table->softDeletes();
             $table->timestamps();
         });
+        // S46: observable orders table on disposable MySQL; any attempted insert is measurable.
+        Schema::connection('mysql')->create('orders', function ($table) {
+            $table->string('uuid', 36)->primary();
+            $table->string('company_uuid', 36)->nullable();
+            $table->timestamps();
+        });
         Schema::connection('mysql')->create('service_quotes', function ($table) {
             $table->string('uuid', 36)->primary();
             $table->string('public_id', 80)->unique();
@@ -108,6 +114,7 @@ class Rc1MySqlQuoteTenantBoundaryTest extends TestCase
         try {
             if (getenv('RC1_EPHEMERAL_MYSQL') === '1' &&
                 config('database.connections.mysql.database') === 'rc1_ci_tenant') {
+                Schema::connection('mysql')->dropIfExists('orders');
                 Schema::connection('mysql')->dropIfExists('service_quotes');
                 Schema::connection('mysql')->dropIfExists('api_credentials');
                 Schema::connection('mysql')->dropIfExists('personal_access_tokens');
@@ -168,11 +175,21 @@ class Rc1MySqlQuoteTenantBoundaryTest extends TestCase
         $this->assertNotNull(\Fleetbase\Models\User::find($credential->user_uuid), 'Synthetic auth user must resolve');
         $this->assertFalse($credential->trashed(), 'Synthetic API credential must not be soft-deleted');
         $this->assertFalse($credential->hasExpired(), 'Synthetic API credential must not be expired');
+        $ordersBefore = $conn->table('orders')->count();
+        $this->assertSame(0, $ordersBefore, 'S46 isolated fixture must start with zero orders');
+        $conn->enableQueryLog();
+        $conn->flushQueryLog();
         $response = $this->withToken('flb_live_S45_synthetic_company_a_ci_only')
             ->postJson('/v1/orders', [
                 'type' => 'transport',
                 'service_quote' => '22222222-2222-4222-8222-222222222222',
             ]);
+        $httpQueries = $conn->getQueryLog();
+        $conn->disableQueryLog();
+        $this->assertSame($ordersBefore, $conn->table('orders')->count(), 'S46 foreign quote must not create any order');
+        foreach ($httpQueries as $entry) {
+            $this->assertDoesNotMatchRegularExpression('/^\\s*(insert\\s+(?:ignore\\s+)?into|replace\\s+into|update|delete\\s+from|truncate\\s+(?:table\\s+)?)[\\s`]*orders\\b/i', $entry['query'], 'S46 HTTP request must not write to orders');
+        }
         $this->assertSame(422, $response->getStatusCode(), 'Authenticated tenant must reject foreign quote before order creation; response=' . substr(str_replace('flb_live_S45_synthetic_company_a_ci_only', '[REDACTED]', (string) $response->getContent()), 0, 250) . '; auth_last_used=' . ($conn->table('api_credentials')->where('uuid', 'cccccccc-cccc-4ccc-8ccc-cccccccccccc')->value('last_used_at') ? 'YES' : 'NO'));
         $this->assertSame($before, $conn->table('service_quotes')->orderBy('uuid')->get(['uuid', 'company_uuid'])->toJson());
         $this->assertSame('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab', session('company'), 'Authentication must derive tenant from credential');
