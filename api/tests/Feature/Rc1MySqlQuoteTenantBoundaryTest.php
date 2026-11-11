@@ -25,6 +25,15 @@ class Rc1MySqlQuoteTenantBoundaryTest extends TestCase
         foreach (['settings', 'users', 'companies'] as $table) {
             Schema::connection('mysql')->create($table, function ($blueprint) use ($table) {
                 $blueprint->string('uuid', 36)->primary();
+                if ($table === 'users') {
+                    $blueprint->string('company_uuid', 36)->nullable();
+                    $blueprint->string('type', 30)->nullable();
+                    $blueprint->softDeletes();
+                }
+                if ($table === 'companies') {
+                    $blueprint->string('owner_uuid', 36)->nullable();
+                    $blueprint->softDeletes();
+                }
                 if ($table === 'settings') {
                     // The actual MergeConfigFromSettings middleware selects key/value.
                     $blueprint->string('key')->unique();
@@ -32,6 +41,18 @@ class Rc1MySqlQuoteTenantBoundaryTest extends TestCase
                 }
             });
         }
+        Schema::connection('mysql')->create('api_credentials', function ($table) {
+            $table->string('uuid', 36)->primary();
+            $table->string('user_uuid', 36);
+            $table->string('company_uuid', 36);
+            $table->string('key', 120)->unique();
+            $table->string('secret')->nullable();
+            $table->boolean('test_mode')->default(false);
+            $table->timestamp('last_used_at')->nullable();
+            $table->timestamp('expires_at')->nullable();
+            $table->softDeletes();
+            $table->timestamps();
+        });
         Schema::connection('mysql')->create('service_quotes', function ($table) {
             $table->string('uuid', 36)->primary();
             $table->string('public_id', 80)->unique();
@@ -40,6 +61,22 @@ class Rc1MySqlQuoteTenantBoundaryTest extends TestCase
             $table->softDeletes();
             $table->timestamps();
         });
+        DB::connection('mysql')->table('users')->insert([
+            'uuid' => 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+            'company_uuid' => 'company-a',
+            'type' => 'admin',
+        ]);
+        DB::connection('mysql')->table('companies')->insert([
+            'uuid' => 'company-a',
+            'owner_uuid' => 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        ]);
+        DB::connection('mysql')->table('api_credentials')->insert([
+            'uuid' => 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+            'user_uuid' => 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+            'company_uuid' => 'company-a',
+            'key' => 'flb_live_S45_synthetic_company_a_ci_only',
+            'test_mode' => 0,
+        ]);
         DB::connection('mysql')->table('service_quotes')->insert([
             ['uuid' => '11111111-1111-4111-8111-111111111111', 'public_id' => 'quote_AAAAAAAA', 'company_uuid' => 'company-a'],
             ['uuid' => '22222222-2222-4222-8222-222222222222', 'public_id' => 'quote_BBBBBBBB', 'company_uuid' => 'company-b'],
@@ -52,6 +89,7 @@ class Rc1MySqlQuoteTenantBoundaryTest extends TestCase
             if (getenv('RC1_EPHEMERAL_MYSQL') === '1' &&
                 config('database.connections.mysql.database') === 'rc1_ci_tenant') {
                 Schema::connection('mysql')->dropIfExists('service_quotes');
+                Schema::connection('mysql')->dropIfExists('api_credentials');
                 foreach (['settings', 'users', 'companies'] as $table) {
                     Schema::connection('mysql')->dropIfExists($table);
                 }
@@ -93,6 +131,21 @@ class Rc1MySqlQuoteTenantBoundaryTest extends TestCase
             $this->assertDoesNotMatchRegularExpression('/^(insert|update|delete|replace|create|drop|alter|truncate)\b/i', ltrim($entry['query']));
         }
         $this->assertSame($before, $conn->table('service_quotes')->orderBy('uuid')->get(['uuid', 'company_uuid'])->toJson());
+    }
+
+    public function test_authenticated_company_a_cannot_order_using_company_b_quote(): void
+    {
+        $conn = DB::connection('mysql');
+        $before = $conn->table('service_quotes')->orderBy('uuid')->get(['uuid', 'company_uuid'])->toJson();
+        $response = $this->withToken('flb_live_S45_synthetic_company_a_ci_only')
+            ->postJson('/v1/orders', [
+                'type' => 'transport',
+                'service_quote' => '22222222-2222-4222-8222-222222222222',
+            ]);
+        $this->assertSame(422, $response->getStatusCode(), 'Authenticated tenant must reject foreign quote before order creation');
+        $this->assertSame($before, $conn->table('service_quotes')->orderBy('uuid')->get(['uuid', 'company_uuid'])->toJson());
+        $this->assertSame('company-a', session('company'), 'Authentication must derive tenant from credential');
+        $this->assertNotNull($conn->table('api_credentials')->where('uuid', 'cccccccc-cccc-4ccc-8ccc-cccccccccccc')->value('last_used_at'), 'Real API auth must update credential last-used timestamp');
     }
 
     private function assertNoWriteLookup(string $reference, bool $visible, bool $expectNoSql = false): void
