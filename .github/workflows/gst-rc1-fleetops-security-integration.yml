@@ -1,7 +1,7 @@
 name: GST RC1 locked FleetOps security integration
 on:
   pull_request:
-    branches: [main]
+    branches: [release/rc1-security-core-e2076d39-20261110]
     paths:
       - '.github/workflows/gst-rc1-fleetops-security-integration.yml'
       - 'scripts/rc1-fleetops-locked-overlay-proof.sh'
