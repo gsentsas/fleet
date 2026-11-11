@@ -61,6 +61,25 @@ class Rc1MySqlQuoteTenantBoundaryTest extends TestCase
         $this->assertNoWriteLookup('22222222-2222-4222-8222-222222222222', false, true);
     }
 
+    public function test_unauthenticated_order_creation_is_rejected_by_http_boundary(): void
+    {
+        $conn = DB::connection('mysql');
+        $before = $conn->table('service_quotes')->orderBy('uuid')->get(['uuid', 'company_uuid'])->toJson();
+        $conn->enableQueryLog();
+        $conn->flushQueryLog();
+        $response = $this->postJson('/v1/orders', [
+            'type' => 'transport',
+            'service_quote' => '22222222-2222-4222-8222-222222222222',
+        ]);
+        $queries = $conn->getQueryLog();
+        $conn->disableQueryLog();
+        $this->assertContains($response->getStatusCode(), [401, 403], 'Missing API credential must be denied by HTTP auth, not 500 or 404');
+        foreach ($queries as $entry) {
+            $this->assertDoesNotMatchRegularExpression('/^(insert|update|delete|replace|create|drop|alter|truncate)\b/i', ltrim($entry['query']));
+        }
+        $this->assertSame($before, $conn->table('service_quotes')->orderBy('uuid')->get(['uuid', 'company_uuid'])->toJson());
+    }
+
     private function assertNoWriteLookup(string $reference, bool $visible, bool $expectNoSql = false): void
     {
         $conn = DB::connection('mysql');
