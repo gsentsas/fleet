@@ -226,7 +226,7 @@ class Rc1MySqlQuoteTenantBoundaryTest extends TestCase
         $this->assertSame($ordersBefore, $conn->table('orders')->count(), 'S46 foreign quote must not create any order');
         $auditEntries = $conn->table('api_request_logs')
             ->where('method', 'POST')
-            ->where('path', 'like', '%/v1/orders%')
+            ->where('path', 'v1/orders')
             ->where('status_code', '422')
             ->get();
         $this->assertGreaterThan($auditBefore, $conn->table('api_request_logs')->count(), 'S47 real API logging must persist a request record');
