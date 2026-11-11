@@ -108,3 +108,33 @@ jobs:
           echo RC1_PATCHED_API_PHPUNIT_UNIT=PASS
           vendor/bin/phpunit -c phpunit.xml --testsuite Feature --exclude-group rc1-mysql-only --colors=never
           echo RC1_PATCHED_API_PHPUNIT_FEATURE=PASS
+
+      - name: S48 isolated MySQL complete migration replay (fail closed)
+        working-directory: api
+        env:
+          APP_ENV: testing
+          APP_URL: http://localhost.test
+          DB_CONNECTION: mysql
+          DB_HOST: 127.0.0.1
+          DB_PORT: '3306'
+          DB_DATABASE: rc1_ci_schema
+          DB_USERNAME: rc1_ci
+          DB_PASSWORD: rc1_ci_ephemeral_only
+          CACHE_DRIVER: array
+          CACHE_STORE: array
+          SESSION_DRIVER: array
+          QUEUE_CONNECTION: sync
+          MAIL_MAILER: array
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: '6379'
+          TELESCOPE_ENABLED: 'false'
+        run: |
+          set -euo pipefail
+          test "${{ github.event_name }}" = "pull_request"
+          test "$DB_DATABASE" = "rc1_ci_schema"
+          test "$APP_ENV" = "testing"
+          export APP_KEY="$(php -r 'echo "base64:".base64_encode(random_bytes(32));')"
+          php -r '$pdo=new PDO("mysql:host=127.0.0.1;port=3306", "root", "rc1_ci_ephemeral_only", [PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION]); $pdo->exec("CREATE DATABASE rc1_ci_schema CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"); $pdo->exec("GRANT ALL PRIVILEGES ON rc1_ci_schema.* TO '''rc1_ci'''@'''%'''); echo "S48_FRESH_DISPOSABLE_SCHEMA=PASS\n";'
+          php artisan migrate --force --no-interaction
+          php artisan migrate:status --no-interaction
+          echo S48_FULL_MIGRATION_REPLAY=PASS
