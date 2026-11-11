@@ -5,6 +5,10 @@ on:
     paths:
       - '.github/workflows/gst-rc1-fleetops-security-integration.yml'
       - 'scripts/rc1-fleetops-locked-overlay-proof.sh'
+      - 'scripts/rc1-firebase-qa-secret-preflight.sh'
+      - 'scripts/rc1-firebase-qa-preflight-contract-test.py'
+      - 'deploy/compose.firebase.qa.yml'
+      - 'docs/rc1-firebase-gsent-it-qa-s37.md'
 permissions:
   contents: read
 jobs:
@@ -23,6 +27,8 @@ jobs:
           php-version: '8.2'
           extensions: mbstring, xml, gd, zip, pdo_mysql, pdo_sqlite, sqlite3, intl, bcmath, gmp
           coverage: none
+      - name: Synthetic Firebase QA preflight contract (no secrets, no Docker)
+        run: python3 scripts/rc1-firebase-qa-preflight-contract-test.py
       - name: Configure read-only Composer metadata access
         working-directory: api
         env:
