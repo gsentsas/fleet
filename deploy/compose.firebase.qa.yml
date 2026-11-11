@@ -1,0 +1,22 @@
+# Optional QA-only overlay; contains NO credentials
+services:
+  application:
+    environment:
+      GOOGLE_CLOUD_PROJECT: gsent-it
+      FIREBASE_CREDENTIALS: /run/secrets/gst-firebase-qa.json
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/gst-firebase-qa.json
+    volumes:
+      - type: bind
+        source: /opt/gst-rc1-staging/secrets-firebase-qa/gsent-it-service-account.json
+        target: /run/secrets/gst-firebase-qa.json
+        read_only: true
+  queue:
+    environment:
+      GOOGLE_CLOUD_PROJECT: gsent-it
+      FIREBASE_CREDENTIALS: /run/secrets/gst-firebase-qa.json
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/gst-firebase-qa.json
+    volumes:
+      - type: bind
+        source: /opt/gst-rc1-staging/secrets-firebase-qa/gsent-it-service-account.json
+        target: /run/secrets/gst-firebase-qa.json
+        read_only: true
