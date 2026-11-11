@@ -156,7 +156,7 @@ class Rc1MySqlQuoteTenantBoundaryTest extends TestCase
                 'type' => 'transport',
                 'service_quote' => '22222222-2222-4222-8222-222222222222',
             ]);
-        $this->assertSame(422, $response->getStatusCode(), 'Authenticated tenant must reject foreign quote before order creation; response_message=' . substr((string) ($response->json('message') ?? 'unknown'), 0, 120));
+        $this->assertSame(422, $response->getStatusCode(), 'Authenticated tenant must reject foreign quote before order creation; response=' . substr(str_replace('flb_live_S45_synthetic_company_a_ci_only', '[REDACTED]', (string) $response->getContent()), 0, 250) . '; auth_last_used=' . ($conn->table('api_credentials')->where('uuid', 'cccccccc-cccc-4ccc-8ccc-cccccccccccc')->value('last_used_at') ? 'YES' : 'NO'));
         $this->assertSame($before, $conn->table('service_quotes')->orderBy('uuid')->get(['uuid', 'company_uuid'])->toJson());
         $this->assertSame('company-a', session('company'), 'Authentication must derive tenant from credential');
         $this->assertNotNull($conn->table('api_credentials')->where('uuid', 'cccccccc-cccc-4ccc-8ccc-cccccccccccc')->value('last_used_at'), 'Real API auth must update credential last-used timestamp');
