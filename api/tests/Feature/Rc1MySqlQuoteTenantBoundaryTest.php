@@ -51,6 +51,7 @@ class Rc1MySqlQuoteTenantBoundaryTest extends TestCase
             $table->string('causer_id')->nullable();
             $table->json('properties')->nullable();
             $table->string('event')->nullable();
+            $table->string('company_id')->nullable();
             $table->string('batch_uuid')->nullable();
             $table->timestamps();
         });
