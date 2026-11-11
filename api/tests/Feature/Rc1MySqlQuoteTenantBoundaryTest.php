@@ -69,23 +69,23 @@ class Rc1MySqlQuoteTenantBoundaryTest extends TestCase
         });
         DB::connection('mysql')->table('users')->insert([
             'uuid' => 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-            'company_uuid' => 'company-a',
+            'company_uuid' => 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab',
             'type' => 'admin',
         ]);
         DB::connection('mysql')->table('companies')->insert([
-            'uuid' => 'company-a',
+            'uuid' => 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab',
             'owner_uuid' => 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
         ]);
         DB::connection('mysql')->table('api_credentials')->insert([
             'uuid' => 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
             'user_uuid' => 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-            'company_uuid' => 'company-a',
+            'company_uuid' => 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab',
             'key' => 'flb_live_S45_synthetic_company_a_ci_only',
             'test_mode' => 0,
         ]);
         DB::connection('mysql')->table('service_quotes')->insert([
-            ['uuid' => '11111111-1111-4111-8111-111111111111', 'public_id' => 'quote_AAAAAAAA', 'company_uuid' => 'company-a'],
-            ['uuid' => '22222222-2222-4222-8222-222222222222', 'public_id' => 'quote_BBBBBBBB', 'company_uuid' => 'company-b'],
+            ['uuid' => '11111111-1111-4111-8111-111111111111', 'public_id' => 'quote_AAAAAAAA', 'company_uuid' => 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab'],
+            ['uuid' => '22222222-2222-4222-8222-222222222222', 'public_id' => 'quote_BBBBBBBB', 'company_uuid' => 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'],
         ]);
     }
 
@@ -108,7 +108,7 @@ class Rc1MySqlQuoteTenantBoundaryTest extends TestCase
 
     public function test_foreign_uuid_and_public_id_are_not_visible_to_tenant(): void
     {
-        session(['company' => 'company-a']);
+        session(['company' => 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab']);
         $this->assertNoWriteLookup('22222222-2222-4222-8222-222222222222', false);
         $this->assertNoWriteLookup('quote_BBBBBBBB', false);
         $this->assertNoWriteLookup('11111111-1111-4111-8111-111111111111', true);
@@ -153,19 +153,6 @@ class Rc1MySqlQuoteTenantBoundaryTest extends TestCase
         $this->assertNotNull(\Fleetbase\Models\User::find($credential->user_uuid), 'Synthetic auth user must resolve');
         $this->assertFalse($credential->trashed(), 'Synthetic API credential must not be soft-deleted');
         $this->assertFalse($credential->hasExpired(), 'Synthetic API credential must not be expired');
-        $middleware = new \Fleetbase\Http\Middleware\AuthenticateOnceWithBasicAuth();
-        $syntheticRequest = Request::create('/v1/orders', 'POST', [], [], [], [
-            'HTTP_AUTHORIZATION' => 'Bearer flb_live_S45_synthetic_company_a_ci_only',
-        ]);
-        $this->assertSame('flb_live_S45_synthetic_company_a_ci_only', $syntheticRequest->bearerToken(), 'Bearer token must be parsed before auth');
-        $sameLookup = \Fleetbase\Models\ApiCredential::on('mysql')
-            ->where('key', $syntheticRequest->bearerToken())
-            ->with(['company.owner'])->withoutGlobalScopes()->first();
-        $this->assertNotNull($sameLookup, 'Exact middleware-style query must resolve synthetic credential');
-        $this->assertNotNull($sameLookup->company?->owner, 'Exact middleware-style query must have owner relation');
-        $authProbe = $middleware->authenticatedWithBasic($syntheticRequest);
-        $this->assertTrue($authProbe === true, 'Direct basic authentication must recognize the ephemeral synthetic credential; result_type=' . (is_object($authProbe) ? get_class($authProbe) : gettype($authProbe)) . '; response=' . ($authProbe instanceof \Illuminate\Http\JsonResponse ? substr(str_replace('flb_live_S45_synthetic_company_a_ci_only', '[REDACTED]', (string) $authProbe->getContent()), 0, 150) : 'none'));
-
         $response = $this->withToken('flb_live_S45_synthetic_company_a_ci_only')
             ->postJson('/v1/orders', [
                 'type' => 'transport',
@@ -173,7 +160,7 @@ class Rc1MySqlQuoteTenantBoundaryTest extends TestCase
             ]);
         $this->assertSame(422, $response->getStatusCode(), 'Authenticated tenant must reject foreign quote before order creation; response=' . substr(str_replace('flb_live_S45_synthetic_company_a_ci_only', '[REDACTED]', (string) $response->getContent()), 0, 250) . '; auth_last_used=' . ($conn->table('api_credentials')->where('uuid', 'cccccccc-cccc-4ccc-8ccc-cccccccccccc')->value('last_used_at') ? 'YES' : 'NO'));
         $this->assertSame($before, $conn->table('service_quotes')->orderBy('uuid')->get(['uuid', 'company_uuid'])->toJson());
-        $this->assertSame('company-a', session('company'), 'Authentication must derive tenant from credential');
+        $this->assertSame('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab', session('company'), 'Authentication must derive tenant from credential');
         $this->assertNotNull($conn->table('api_credentials')->where('uuid', 'cccccccc-cccc-4ccc-8ccc-cccccccccccc')->value('last_used_at'), 'Real API auth must update credential last-used timestamp');
     }
 
