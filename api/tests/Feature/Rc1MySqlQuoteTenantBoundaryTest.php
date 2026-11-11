@@ -158,7 +158,7 @@ class Rc1MySqlQuoteTenantBoundaryTest extends TestCase
             'HTTP_AUTHORIZATION' => 'Bearer flb_live_S45_synthetic_company_a_ci_only',
         ]);
         $authProbe = $middleware->authenticatedWithBasic($syntheticRequest);
-        $this->assertTrue($authProbe === true, 'Direct basic authentication must recognize the ephemeral synthetic credential; result_type=' . (is_object($authProbe) ? get_class($authProbe) : gettype($authProbe)));
+        $this->assertTrue($authProbe === true, 'Direct basic authentication must recognize the ephemeral synthetic credential; result_type=' . (is_object($authProbe) ? get_class($authProbe) : gettype($authProbe)) . '; response=' . ($authProbe instanceof \Illuminate\Http\JsonResponse ? substr(str_replace('flb_live_S45_synthetic_company_a_ci_only', '[REDACTED]', (string) $authProbe->getContent()), 0, 150) : 'none'));
 
         $response = $this->withToken('flb_live_S45_synthetic_company_a_ci_only')
             ->postJson('/v1/orders', [
