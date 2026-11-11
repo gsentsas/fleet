@@ -157,6 +157,12 @@ class Rc1MySqlQuoteTenantBoundaryTest extends TestCase
         $syntheticRequest = Request::create('/v1/orders', 'POST', [], [], [], [
             'HTTP_AUTHORIZATION' => 'Bearer flb_live_S45_synthetic_company_a_ci_only',
         ]);
+        $this->assertSame('flb_live_S45_synthetic_company_a_ci_only', $syntheticRequest->bearerToken(), 'Bearer token must be parsed before auth');
+        $sameLookup = \Fleetbase\Models\ApiCredential::on('mysql')
+            ->where('key', $syntheticRequest->bearerToken())
+            ->with(['company.owner'])->withoutGlobalScopes()->first();
+        $this->assertNotNull($sameLookup, 'Exact middleware-style query must resolve synthetic credential');
+        $this->assertNotNull($sameLookup->company?->owner, 'Exact middleware-style query must have owner relation');
         $authProbe = $middleware->authenticatedWithBasic($syntheticRequest);
         $this->assertTrue($authProbe === true, 'Direct basic authentication must recognize the ephemeral synthetic credential; result_type=' . (is_object($authProbe) ? get_class($authProbe) : gettype($authProbe)) . '; response=' . ($authProbe instanceof \Illuminate\Http\JsonResponse ? substr(str_replace('flb_live_S45_synthetic_company_a_ci_only', '[REDACTED]', (string) $authProbe->getContent()), 0, 150) : 'none'));
 
