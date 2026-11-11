@@ -5,12 +5,13 @@ namespace Tests\Feature;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
+use PHPUnit\Framework\Attributes\Group;
 
 /**
- * @group rc1-mysql-only
  * S49: registered Fleetbase HTTP middlewares on real migrated disposable MySQL.
  * No schema creation, migration, fake middleware or production access in this test.
  */
+#[Group('rc1-mysql-only')]
 class Rc1FullSchemaHttpTenantTest extends TestCase
 {
     private const COMPANY_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab';
