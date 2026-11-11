@@ -25,12 +25,12 @@ for name, path in PATHS.items():
 
 httpd = PATHS["HTTPD"].read_text(encoding="utf-8")
 sensitive = re.search(
-    r"(?s)location\s*=\s*/int/v1/fleet-ops/navigator/link-app\s*\{([^}]+)\}",
+    r"(?ms)^  location\s*=\s*/int/v1/fleet-ops/navigator/link-app\s*\{\n(.*?)^  \}",
     httpd,
 )
 assert sensitive is not None, "HTTPD: sensitive route needs a location override"
 assert re.search(r"error_log\s+/dev/null\s+crit\s*;", sensitive.group(1)), "HTTPD: pairing error-log could expose token"
-default = re.search(r"(?s)location\s+/\s*\{([^}]+)\}", httpd)
+default = re.search(r"(?ms)^  location\s+/\s*\{\n(.*?)^  \}", httpd)
 assert default is not None, "HTTPD: default proxy location absent"
 upstream = re.compile(r"proxy_pass\s+([^;]+);")
 a = upstream.search(sensitive.group(1))
