@@ -19,6 +19,7 @@ on:
 
 jobs:
   build:
+    if: github.ref_name != 'test/rc1-s98-r5-export-cc959ac'
     name: Build and Start Docker Services
     runs-on: ubuntu-latest
 
@@ -38,3 +39,118 @@ jobs:
       with:
         files: |
           ./docker-bake.hcl
+
+
+  export_candidate:
+    name: Export RC1 ${{ matrix.component }} AMD64 (no push)
+    if: github.event_name == 'workflow_dispatch' && github.ref_name == 'test/rc1-s98-r5-export-cc959ac'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [api, console]
+    steps:
+      - name: Checkout exact release candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: cc959ac46b184dd15539cc872a6aeb353fcec615
+          persist-credentials: false
+      - name: Verify exact release SHA and free space
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = cc959ac46b184dd15539cc872a6aeb353fcec615
+          df -h /
+          free_mb=$(df -Pm / | awk 'NR==2 { print $4 }')
+          if (( free_mb < 6500 )); then echo '::error::Insufficient disposable runner disk'; exit 1; fi
+          echo 'S98_R5_EXACT_CANDIDATE_CHECKOUT=PASS'
+      - name: Set up ephemeral Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build and export Docker archive, not a registry
+        shell: bash
+        env:
+          COMPONENT: ${{ matrix.component }}
+          COMPOSER_AUTH: '{"github-oauth":{"github.com":"${{ github.token }}"}}'
+        run: |
+          set -euo pipefail
+          sha=cc959ac46b184dd15539cc872a6aeb353fcec615
+          path="$RUNNER_TEMP/candidate-$COMPONENT.docker.tar"
+          args=(--platform linux/amd64 --progress plain --provenance=false --label "org.opencontainers.image.revision=$sha" --tag "gst-rc1-$COMPONENT:cc959ac-amd64" --output "type=docker,dest=$path")
+          case "$COMPONENT" in
+            api)
+              args+=(--file docker/Dockerfile --target app-release --secret id=composer_auth,env=COMPOSER_AUTH)
+              context='.'
+              ;;
+            console)
+              args+=(--file console/Dockerfile)
+              context='./console'
+              ;;
+            *) echo '::error::Unexpected component'; exit 2 ;;
+          esac
+          docker buildx build "${args[@]}" "$context"
+          test -s "$path"
+          echo 'S98_R5_DOCKER_BUILD_EXPORT=PASS'
+      - name: Verify image manifest, platform, revision and forbidden files
+        shell: bash
+        env:
+          COMPONENT: ${{ matrix.component }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, tarfile
+          component = os.environ['COMPONENT']
+          path = os.path.join(os.environ['RUNNER_TEMP'], 'candidate-' + component + '.docker.tar')
+          expected_tag = 'gst-rc1-' + component + ':cc959ac-amd64'
+          revision = 'cc959ac46b184dd15539cc872a6aeb353fcec615'
+          with tarfile.open(path) as archive:
+              records = json.load(archive.extractfile('manifest.json'))
+              assert len(records) == 1, 'Expected exactly one image'
+              record = records[0]
+              assert expected_tag in record['RepoTags'], 'Release tag mismatch'
+              config = json.load(archive.extractfile(record['Config']))
+              assert (config['os'], config['architecture']) == ('linux', 'amd64'), 'Wrong platform'
+              assert config['config']['Labels']['org.opencontainers.image.revision'] == revision, 'Wrong SHA'
+              env = config['config'].get('Env') or []
+              blocked_env = ('COMPOSER_AUTH=', 'GITHUB_TOKEN=', 'GH_JOB_TOKEN=', 'FIREBASE_PRIVATE_KEY=')
+              assert not any(value.startswith(blocked_env) for value in env), 'Secret in image environment'
+              forbidden = ('.env', 'auth.json', 'composer-auth.json', 'id_rsa', 'composer_auth')
+              for layer in record['Layers']:
+                  stream = archive.extractfile(layer)
+                  with tarfile.open(fileobj=stream, mode='r|*') as layer_tar:
+                      for member in layer_tar:
+                          parts = member.name.lstrip('./').split('/')
+                          if any(part in forbidden for part in parts):
+                              raise RuntimeError('Forbidden secret-like file in image layer')
+          print('S98_R5_IMAGE_PLATFORM_REVISION_SECRET_PATH_CHECK=PASS')
+          PY
+      - name: Compress archive with bounded upload size
+        shell: bash
+        env:
+          COMPONENT: ${{ matrix.component }}
+        run: |
+          set -euo pipefail
+          input="$RUNNER_TEMP/candidate-$COMPONENT.docker.tar"
+          output="$RUNNER_TEMP/candidate-$COMPONENT.docker.tar.gz"
+          free_mb=$(df -Pm "$RUNNER_TEMP" | awk 'NR==2 { print $4 }')
+          if (( free_mb < 1500 )); then echo '::error::Insufficient scratch for export compression'; exit 1; fi
+          gzip -1 -c "$input" > "$output"
+          rm -f "$input"
+          bytes=$(stat -c %s "$output")
+          if (( bytes > 1900000000 )); then echo '::error::Compressed image exceeds guarded upload size'; exit 1; fi
+          sha256sum "$output"
+          gzip -t "$output"
+          echo 'S98_R5_ARCHIVE_INTEGRITY=PASS'
+      - name: Retain short-lived nonproduction image archive
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: gst-rc1-${{ matrix.component }}-cc959ac-amd64
+          path: ${{ runner.temp }}/candidate-${{ matrix.component }}.docker.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+      - name: Final reproducibility marker
+        shell: bash
+        run: echo 'S98_R5_EXPORTED_ARTIFACT=PASS'
