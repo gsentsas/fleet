@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/workflows/gst-rc1-fleetops-security-integration.yml'
       - 'scripts/rc1-fleetops-locked-overlay-proof.sh'
+      - 'api/tests/Feature/Rc1MySqlQuoteTenantBoundaryTest.php'
       - 'scripts/rc1-firebase-qa-secret-preflight.sh'
       - 'scripts/rc1-firebase-qa-preflight-contract-test.py'
       - 'scripts/rc1-firebase-sdk-config-contract.php'
