@@ -7,6 +7,8 @@ on:
       - 'scripts/rc1-fleetops-locked-overlay-proof.sh'
       - 'api/tests/Feature/Rc1MySqlQuoteTenantBoundaryTest.php'
       - 'api/tests/Feature/Rc1FullSchemaHttpTenantTest.php'
+      - 'api/tests/Feature/Rc1*.php'
+      - 'api/tests/Unit/Rc1Firebase*.php'
       - 'scripts/rc1-firebase-qa-secret-preflight.sh'
       - 'scripts/rc1-firebase-qa-preflight-contract-test.py'
       - 'scripts/rc1-firebase-sdk-config-contract.php'
