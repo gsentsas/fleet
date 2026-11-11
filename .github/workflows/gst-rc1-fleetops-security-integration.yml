@@ -1,0 +1,32 @@
+name: GST RC1 locked FleetOps security integration
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/gst-rc1-fleetops-security-integration.yml'
+      - 'scripts/rc1-fleetops-locked-overlay-proof.sh'
+permissions:
+  contents: read
+jobs:
+  locked-fleetops-overlay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      COMPOSER_NO_INTERACTION: '1'
+      COMPOSER_PROCESS_TIMEOUT: '600'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, xml, gd, zip, pdo_mysql, pdo_sqlite, sqlite3, intl, bcmath, gmp
+          coverage: none
+      - name: Configure read-only Composer metadata access
+        working-directory: api
+        env:
+          GH_JOB_TOKEN: ${{ github.token }}
+        run: composer config --global github-oauth.github.com "$GH_JOB_TOKEN"
+      - name: Exact committed lock plus pinned FleetOps security overlay
+        run: bash scripts/rc1-fleetops-locked-overlay-proof.sh
