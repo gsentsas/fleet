@@ -16,6 +16,21 @@ jobs:
   locked-fleetops-overlay:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: rc1_ci_ephemeral_only
+          MYSQL_DATABASE: rc1_ci_tenant
+          MYSQL_USER: rc1_ci
+          MYSQL_PASSWORD: rc1_ci_ephemeral_only
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd='mysqladmin ping -h 127.0.0.1 --silent'
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=20
     env:
       COMPOSER_NO_INTERACTION: '1'
       COMPOSER_PROCESS_TIMEOUT: '600'
@@ -44,6 +59,30 @@ jobs:
           FIREBASE_CREDENTIALS: /run/secrets/gst-firebase-qa.json
           GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/gst-firebase-qa.json
         run: php ../scripts/rc1-firebase-sdk-config-contract.php
+      - name: Real FleetOps service-quote tenant isolation on disposable MySQL
+        working-directory: api
+        env:
+          RC1_EPHEMERAL_MYSQL: '1'
+          APP_ENV: testing
+          APP_URL: http://localhost.test
+          DB_CONNECTION: mysql
+          DB_HOST: 127.0.0.1
+          DB_PORT: '3306'
+          DB_DATABASE: rc1_ci_tenant
+          DB_USERNAME: rc1_ci
+          DB_PASSWORD: rc1_ci_ephemeral_only
+          CACHE_STORE: array
+          CACHE_DRIVER: array
+          MAIL_MAILER: array
+          QUEUE_CONNECTION: sync
+          SESSION_DRIVER: array
+          LOG_CHANNEL: stderr
+          TELESCOPE_ENABLED: 'false'
+        run: |
+          set -euo pipefail
+          export APP_KEY="$(php -r 'echo "base64:".base64_encode(random_bytes(32));')"
+          vendor/bin/phpunit -c phpunit.xml --colors=never tests/Feature/Rc1MySqlQuoteTenantBoundaryTest.php
+          echo RC1_REAL_MYSQL_SERVICE_QUOTE_TENANT=PASS
       - name: Real API PHPUnit Unit and Feature after patched FleetOps overlay
         working-directory: api
         env:
