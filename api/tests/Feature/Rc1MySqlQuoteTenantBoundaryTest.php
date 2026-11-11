@@ -151,6 +151,15 @@ class Rc1MySqlQuoteTenantBoundaryTest extends TestCase
         $this->assertNotNull($credential->company, 'Synthetic tenant company must resolve');
         $this->assertNotNull($credential->company->owner, 'Synthetic company owner must resolve');
         $this->assertNotNull(\Fleetbase\Models\User::find($credential->user_uuid), 'Synthetic auth user must resolve');
+        $this->assertFalse($credential->trashed(), 'Synthetic API credential must not be soft-deleted');
+        $this->assertFalse($credential->hasExpired(), 'Synthetic API credential must not be expired');
+        $middleware = new \Fleetbase\Http\Middleware\AuthenticateOnceWithBasicAuth();
+        $syntheticRequest = Request::create('/v1/orders', 'POST', [], [], [], [
+            'HTTP_AUTHORIZATION' => 'Bearer flb_live_S45_synthetic_company_a_ci_only',
+        ]);
+        $authProbe = $middleware->authenticatedWithBasic($syntheticRequest);
+        $this->assertTrue($authProbe === true, 'Direct basic authentication must recognize the ephemeral synthetic credential; result_type=' . (is_object($authProbe) ? get_class($authProbe) : gettype($authProbe)));
+
         $response = $this->withToken('flb_live_S45_synthetic_company_a_ci_only')
             ->postJson('/v1/orders', [
                 'type' => 'transport',
