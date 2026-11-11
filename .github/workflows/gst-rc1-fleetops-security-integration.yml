@@ -16,7 +16,7 @@ permissions:
   contents: read
 jobs:
   locked-fleetops-overlay:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     services:
       redis:
@@ -36,7 +36,7 @@ jobs:
       COMPOSER_NO_INTERACTION: '1'
       COMPOSER_PROCESS_TIMEOUT: '600'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
       - uses: shivammathur/setup-php@v2
