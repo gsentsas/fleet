@@ -23,8 +23,13 @@ class Rc1MySqlQuoteTenantBoundaryTest extends TestCase
         // Minimal installation markers required by the actual global
         // EnsureFleetbaseConfigured middleware. Ephemeral CI database only.
         foreach (['settings', 'users', 'companies'] as $table) {
-            Schema::connection('mysql')->create($table, function ($blueprint) {
+            Schema::connection('mysql')->create($table, function ($blueprint) use ($table) {
                 $blueprint->string('uuid', 36)->primary();
+                if ($table === 'settings') {
+                    // The actual MergeConfigFromSettings middleware selects key/value.
+                    $blueprint->string('key')->unique();
+                    $blueprint->text('value')->nullable();
+                }
             });
         }
         Schema::connection('mysql')->create('service_quotes', function ($table) {
