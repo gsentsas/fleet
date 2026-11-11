@@ -41,6 +41,12 @@ class Rc1MySqlQuoteTenantBoundaryTest extends TestCase
                 }
             });
         }
+        Schema::connection('mysql')->create('personal_access_tokens', function ($table) {
+            $table->bigIncrements('id');
+            $table->string('token', 64)->unique();
+            $table->string('tokenable_type')->nullable();
+            $table->unsignedBigInteger('tokenable_id')->nullable();
+        });
         Schema::connection('mysql')->create('api_credentials', function ($table) {
             $table->string('uuid', 36)->primary();
             $table->string('user_uuid', 36);
@@ -90,6 +96,7 @@ class Rc1MySqlQuoteTenantBoundaryTest extends TestCase
                 config('database.connections.mysql.database') === 'rc1_ci_tenant') {
                 Schema::connection('mysql')->dropIfExists('service_quotes');
                 Schema::connection('mysql')->dropIfExists('api_credentials');
+                Schema::connection('mysql')->dropIfExists('personal_access_tokens');
                 foreach (['settings', 'users', 'companies'] as $table) {
                     Schema::connection('mysql')->dropIfExists($table);
                 }
