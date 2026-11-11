@@ -73,6 +73,41 @@ class Rc1MySqlQuoteTenantBoundaryTest extends TestCase
             $table->softDeletes();
             $table->timestamps();
         });
+        // S47: replicate pinned core-api e2076d3 api_request_logs base migration
+        // in disposable CI only; permit real request logger to persist evidence.
+        Schema::connection('mysql')->create('api_request_logs', function ($table) {
+            $table->increments('id');
+            $table->string('_key')->nullable();
+            $table->char('uuid', 36)->unique();
+            $table->char('company_uuid', 36)->nullable()->index();
+            $table->char('api_credential_uuid', 36)->nullable()->index();
+            $table->string('public_id', 191)->nullable()->index();
+            $table->string('method', 191)->nullable()->index();
+            $table->string('path', 191)->nullable()->index();
+            $table->string('full_url')->nullable();
+            $table->string('status_code', 191)->nullable()->index();
+            $table->string('reason_phrase')->nullable();
+            $table->decimal('duration', 17, 14)->nullable();
+            $table->string('ip_address')->nullable();
+            $table->string('version')->nullable();
+            $table->string('source')->nullable();
+            $table->string('content_type')->nullable();
+            $table->json('related')->nullable();
+            $table->json('query_params')->nullable();
+            $table->json('request_headers')->nullable();
+            $table->json('request_body')->nullable();
+            $table->mediumText('request_raw_body')->nullable();
+            $table->json('response_headers')->nullable();
+            $table->json('response_body')->nullable();
+            $table->mediumText('response_raw_body')->nullable();
+            $table->timestamp('created_at')->nullable()->index();
+            $table->timestamp('updated_at')->nullable();
+            $table->softDeletes()->index();
+        });
+        Schema::connection('mysql')->table('api_request_logs', function ($table) {
+            $table->foreign('api_credential_uuid')->references('uuid')->on('api_credentials')->cascadeOnUpdate()->cascadeOnDelete();
+            $table->foreign('company_uuid')->references('uuid')->on('companies')->cascadeOnUpdate()->cascadeOnDelete();
+        });
         // S46: observable orders table on disposable MySQL; any attempted insert is measurable.
         Schema::connection('mysql')->create('orders', function ($table) {
             $table->string('uuid', 36)->primary();
@@ -114,6 +149,7 @@ class Rc1MySqlQuoteTenantBoundaryTest extends TestCase
         try {
             if (getenv('RC1_EPHEMERAL_MYSQL') === '1' &&
                 config('database.connections.mysql.database') === 'rc1_ci_tenant') {
+                Schema::connection('mysql')->dropIfExists('api_request_logs');
                 Schema::connection('mysql')->dropIfExists('orders');
                 Schema::connection('mysql')->dropIfExists('service_quotes');
                 Schema::connection('mysql')->dropIfExists('api_credentials');
@@ -175,6 +211,7 @@ class Rc1MySqlQuoteTenantBoundaryTest extends TestCase
         $this->assertNotNull(\Fleetbase\Models\User::find($credential->user_uuid), 'Synthetic auth user must resolve');
         $this->assertFalse($credential->trashed(), 'Synthetic API credential must not be soft-deleted');
         $this->assertFalse($credential->hasExpired(), 'Synthetic API credential must not be expired');
+        $auditBefore = $conn->table('api_request_logs')->count();
         $ordersBefore = $conn->table('orders')->count();
         $this->assertSame(0, $ordersBefore, 'S46 isolated fixture must start with zero orders');
         $conn->enableQueryLog();
@@ -187,6 +224,13 @@ class Rc1MySqlQuoteTenantBoundaryTest extends TestCase
         $httpQueries = $conn->getQueryLog();
         $conn->disableQueryLog();
         $this->assertSame($ordersBefore, $conn->table('orders')->count(), 'S46 foreign quote must not create any order');
+        $auditEntries = $conn->table('api_request_logs')
+            ->where('method', 'POST')
+            ->where('path', 'like', '%/v1/orders%')
+            ->where('status_code', '422')
+            ->get();
+        $this->assertGreaterThan($auditBefore, $conn->table('api_request_logs')->count(), 'S47 real API logging must persist a request record');
+        $this->assertNotEmpty($auditEntries, 'S47 HTTP 422 rejection must appear in real API audit table');
         foreach ($httpQueries as $entry) {
             $this->assertDoesNotMatchRegularExpression('/^\\s*(insert\\s+(?:ignore\\s+)?into|replace\\s+into|update|delete\\s+from|truncate\\s+(?:table\\s+)?)[\\s`]*orders\\b/i', $entry['query'], 'S46 HTTP request must not write to orders');
         }
