@@ -30,3 +30,25 @@ jobs:
         run: composer config --global github-oauth.github.com "$GH_JOB_TOKEN"
       - name: Exact committed lock plus pinned FleetOps security overlay
         run: bash scripts/rc1-fleetops-locked-overlay-proof.sh
+      - name: Real API PHPUnit Unit and Feature after patched FleetOps overlay
+        working-directory: api
+        env:
+          APP_ENV: testing
+          APP_URL: http://localhost.test
+          DB_CONNECTION: sqlite
+          DB_DATABASE: ':memory:'
+          CACHE_STORE: array
+          CACHE_DRIVER: array
+          MAIL_MAILER: array
+          QUEUE_CONNECTION: sync
+          SESSION_DRIVER: array
+          LOG_CHANNEL: stderr
+          TELESCOPE_ENABLED: 'false'
+        run: |
+          set -euo pipefail
+          export APP_KEY="$(php -r 'echo "base64:".base64_encode(random_bytes(32));')"
+          test "$(sha256sum composer.lock | cut -d ' ' -f1)" = '3d3ae9cfb74c7b8015f83de1d01a65b950109b2815dd566b4b5d4297cc0550bd'
+          vendor/bin/phpunit -c phpunit.xml --testsuite Unit --colors=never
+          echo RC1_PATCHED_API_PHPUNIT_UNIT=PASS
+          vendor/bin/phpunit -c phpunit.xml --testsuite Feature --colors=never
+          echo RC1_PATCHED_API_PHPUNIT_FEATURE=PASS
