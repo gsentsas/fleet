@@ -7,9 +7,10 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
+use PHPUnit\Framework\Attributes\Group;
 
 /** Real FleetOps quote resolver, exercised against disposable CI MySQL. */
-/** @group rc1-mysql-only */
+#[Group('rc1-mysql-only')]
 class Rc1MySqlQuoteTenantBoundaryTest extends TestCase
 {
     protected function setUp(): void
