@@ -144,12 +144,19 @@ class Rc1MySqlQuoteTenantBoundaryTest extends TestCase
     {
         $conn = DB::connection('mysql');
         $before = $conn->table('service_quotes')->orderBy('uuid')->get(['uuid', 'company_uuid'])->toJson();
+        $credential = \Fleetbase\Models\ApiCredential::on('mysql')
+            ->where('key', 'flb_live_S45_synthetic_company_a_ci_only')
+            ->with(['company.owner'])->withoutGlobalScopes()->first();
+        $this->assertNotNull($credential, 'Synthetic API credential must resolve');
+        $this->assertNotNull($credential->company, 'Synthetic tenant company must resolve');
+        $this->assertNotNull($credential->company->owner, 'Synthetic company owner must resolve');
+        $this->assertNotNull(\Fleetbase\Models\User::find($credential->user_uuid), 'Synthetic auth user must resolve');
         $response = $this->withToken('flb_live_S45_synthetic_company_a_ci_only')
             ->postJson('/v1/orders', [
                 'type' => 'transport',
                 'service_quote' => '22222222-2222-4222-8222-222222222222',
             ]);
-        $this->assertSame(422, $response->getStatusCode(), 'Authenticated tenant must reject foreign quote before order creation');
+        $this->assertSame(422, $response->getStatusCode(), 'Authenticated tenant must reject foreign quote before order creation; response_message=' . substr((string) ($response->json('message') ?? 'unknown'), 0, 120));
         $this->assertSame($before, $conn->table('service_quotes')->orderBy('uuid')->get(['uuid', 'company_uuid'])->toJson());
         $this->assertSame('company-a', session('company'), 'Authentication must derive tenant from credential');
         $this->assertNotNull($conn->table('api_credentials')->where('uuid', 'cccccccc-cccc-4ccc-8ccc-cccccccccccc')->value('last_used_at'), 'Real API auth must update credential last-used timestamp');
