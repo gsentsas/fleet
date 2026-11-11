@@ -17,6 +17,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
       mysql:
         image: mysql:8.0
         env:
@@ -71,6 +75,8 @@ jobs:
           MAIL_MAILER: array
           QUEUE_CONNECTION: sync
           SESSION_DRIVER: array
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: '6379'
           LOG_CHANNEL: stderr
           TELESCOPE_ENABLED: 'false'
         run: |
