@@ -62,7 +62,7 @@ SELECT CONCAT('Fleetbase',CHAR(92),'Models',CHAR(92),'User'),uuid,
  'rc1-no-role',SHA2('rc1_sanctum_no_role_20261110',256),'["*"]',NOW(),NOW()
 FROM users WHERE public_id='rc1-auth-user-a';
 INSERT INTO personal_access_tokens(tokenable_type,tokenable_id,name,token,abilities,created_at,updated_at)
-SELECT CONCAT('Fleetbase',CHAR(92),'Models',CHAR(92),'User'),id,
+SELECT CONCAT('Fleetbase',CHAR(92),'Models',CHAR(92),'User'),uuid,
  'rc1-admin',SHA2('rc1_sanctum_admin_20261110',256),'["*"]',NOW(),NOW()
 FROM users WHERE public_id='rc1-auth-user-b';
 SQL

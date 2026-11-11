@@ -1,0 +1,23 @@
+name: RC1 Sanctum fixture UUID gate
+on:
+  pull_request:
+    paths:
+      - 'scripts/rc1-sanctum-*.sh'
+      - 'scripts/check-rc1-sanctum-fixture-uuid.py'
+      - '.github/workflows/gst-rc1-sanctum-fixture.yml'
+  workflow_dispatch:
+jobs:
+  fixture-uuid:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check six admin UUID fixtures
+        run: python3 scripts/check-rc1-sanctum-fixture-uuid.py
+      - name: Bash syntax of all RC1 Sanctum labs
+        run: |
+          set -eu
+          for f in scripts/rc1-sanctum-*.sh; do
+            bash -n "$f"
+          done
