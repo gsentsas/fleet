@@ -1,0 +1,75 @@
+name: GST RC1 Console static artifact (QA only)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/gst-rc1-console-dist-artifact.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  console-dist:
+    if: github.head_ref == 'release/rc1-console-artifact-c806c079'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout exactly validated RC1 source
+        uses: actions/checkout@v4
+        with:
+          ref: c806c0798a6793ae2b5f6b1941a373ecb1884517
+          persist-credentials: false
+
+      - name: Verify exact source and lockfile
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 'c806c0798a6793ae2b5f6b1941a373ecb1884517'
+          test -f console/pnpm-lock.yaml
+          test -f console/nginx.conf
+          printf 'RC1_CONSOLE_SOURCE_SHA=PASS\n'
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Set up pnpm locked to existing CI version
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.0.9
+
+      - name: Install exact frontend dependencies
+        working-directory: console
+        run: pnpm install --frozen-lockfile
+
+      - name: Build production static Console
+        working-directory: console
+        run: pnpm exec ember build --environment production
+
+      - name: Validate distributable and make checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s console/dist/index.html
+          # Ember fingerprints filenames in production; never expect an unfingerprinted vendor.js.
+          test -d console/dist/assets
+          test -n "$(find console/dist/assets -maxdepth 1 -type f -name 'vendor*.js' -print -quit)"
+          test -n "$(find console/dist/assets -maxdepth 1 -type f -name '*.js' -print -quit)"
+          cd console/dist
+          find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+          test -s SHA256SUMS
+          sha256sum -c SHA256SUMS >/dev/null
+          printf 'RC1_CONSOLE_DIST=PASS files=%s\n' "$(wc -l < SHA256SUMS)"
+          printf 'RC1_CONSOLE_DIST_SHA256SUMS='
+          sha256sum SHA256SUMS | cut -d' ' -f1
+
+      - name: Upload immutable-source Console static output
+        uses: actions/upload-artifact@v4
+        with:
+          name: gst-rc1-console-dist-c806c079
+          path: console/dist/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 6
