@@ -20,6 +20,13 @@ class Rc1MySqlQuoteTenantBoundaryTest extends TestCase
             config('database.default') !== 'mysql') {
             $this->fail('STOP=NOT_AN_EXPLICIT_EPHEMERAL_MYSQL_CI_DATABASE');
         }
+        // Minimal installation markers required by the actual global
+        // EnsureFleetbaseConfigured middleware. Ephemeral CI database only.
+        foreach (['settings', 'users', 'companies'] as $table) {
+            Schema::connection('mysql')->create($table, function ($blueprint) {
+                $blueprint->string('uuid', 36)->primary();
+            });
+        }
         Schema::connection('mysql')->create('service_quotes', function ($table) {
             $table->string('uuid', 36)->primary();
             $table->string('public_id', 80)->unique();
@@ -40,6 +47,9 @@ class Rc1MySqlQuoteTenantBoundaryTest extends TestCase
             if (getenv('RC1_EPHEMERAL_MYSQL') === '1' &&
                 config('database.connections.mysql.database') === 'rc1_ci_tenant') {
                 Schema::connection('mysql')->dropIfExists('service_quotes');
+                foreach (['settings', 'users', 'companies'] as $table) {
+                    Schema::connection('mysql')->dropIfExists($table);
+                }
             }
         } finally {
             parent::tearDown();
