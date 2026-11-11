@@ -22,6 +22,19 @@ Status: READ-ONLY QUEUE INVENTORY PASSED at observation time; release is NO-GO.
 - PHPUnit on locked Laravel 12 RC1: 54 tests and 158 assertions PASS at S33,
   including old/new serialized job shapes.
 
+## S35 read-only SQL failed-job inventory (2026-11-11)
+
+- Production failed_jobs table exists: exactly 3 records on redis/default.
+- Oldest 2026-11-06 19:28:16; newest 2026-11-06 19:46:47.
+- One each: Fleetbase/FleetOps/Notifications/OrderAssigned, OrderPing,
+  OrderDispatched. These are classes only, not payload disclosure.
+- FinalizeApiOrderCreation: 0; FinalizeInternalOrderCreation: 0 among
+  this failed-job snapshot. This does not prove future queues empty.
+- No SQL write, retry, queue mutation, worker shutdown or payload export.
+- Before release, investigate failure causes and notification idempotency
+  separately in an isolated QA environment, keep all three records until
+  explicit disposition, and recheck aggregate metrics at cutover.
+
 ## Required before cutover
 1. At an agreed maintenance window, repeat read-only Redis queue inventory
    and inspect aggregate failed_jobs metadata in the approved QA or production
