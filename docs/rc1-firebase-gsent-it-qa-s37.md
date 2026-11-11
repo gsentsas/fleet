@@ -23,3 +23,25 @@ Required next actions:
 - Production remains untouched and NO-GO.
 
 STATUS: overlay prepared; QA secret not installed; Firebase not started.
+
+## S40 — Mac-side offline credential integrity gate (2026-11-11)
+
+Executed locally on the user's authorized Mac, not on QA or production.
+Validated gsent-it Firebase Admin service-account JSON metadata without
+printing the key, client_email or token. Exact boolean-only checks PASS:
+project_id matches gsent-it, type is service_account, client-email
+domain corresponds to gsent-it IAM service account, client_id and
+private_key_id present, token_uri host is oauth2.googleapis.com,
+file is mode 0600, PEM boundary valid and OpenSSL pkey -check succeeds.
+No Firebase network request, no transfer to server, no notification sent.
+
+Note: this establishes local key format/integrity and project metadata
+consistency only. It does NOT prove account has active permissions in
+Google Cloud, Firebase delivery or server config. Earlier credential
+transfer was explicitly denied; do not circumvent that denial.
+QA service-account remains absent, and the S39 preflight intentionally
+fails closed. QA database restore and authenticated HTTP gates remain open.
+
+S40_OFFLINE_ACCOUNT_INTEGRITY=PASS
+S40_SERVER_PROVISIONING=BLOCKED
+S40_PRODUCTION=NO_GO
