@@ -52,12 +52,9 @@ assert "proxy_set_header Host" in sensitive.group(1), "HTTPD: pairing route miss
 # Both the token redemption and token issuance endpoints carry bearer URLs.
 # Avoid browser/proxy storage and referrer propagation even on non-2xx responses.
 for route in ("link-app", "get-link-app"):
-    location = re.search(
-        rf"(?ms)^  location\\s*=\\s*/int/v1/fleet-ops/navigator/{route}\\s*\\{{\\n(.*?)^  \\}}",
-        httpd,
-    )
-    assert location is not None, f"HTTPD: {route} exact location absent"
-    body = location.group(1)
+    header = f"  location = /int/v1/fleet-ops/navigator/{route} {{\\n"
+    assert header in httpd, f"HTTPD: {route} exact location absent"
+    body = httpd.split(header, 1)[1].split("\\n  }", 1)[0]
     for directive in (
         'proxy_hide_header Cache-Control;',
         'add_header Cache-Control "no-store" always;',
