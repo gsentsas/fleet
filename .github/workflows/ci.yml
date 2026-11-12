@@ -19,6 +19,7 @@ on:
 
 jobs:
   build:
+    if: github.ref_name != 'test/rc1-s98-r15-android-device-qa'
     name: Build and Start Docker Services
     runs-on: ubuntu-latest
 
@@ -38,3 +39,179 @@ jobs:
       with:
         files: |
           ./docker-bake.hcl
+
+  android_navigator_qa:
+    name: RC1 Navigator Android ARM64 debug APK (synthetic FCM, no deploy)
+    if: github.event_name == 'workflow_dispatch' && github.ref_name == 'test/rc1-s98-r15-android-device-qa'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    permissions:
+      contents: read
+    env:
+      CI: 'true'
+      EXPECTED_FLEET_SHA: 573689e53a7fc0ab6c90e7901c3fd58d596c2376
+      EXPECTED_NAVIGATOR_SHA: 0da77ce050ad4621efc0ede115c6e2692cda2c8e
+    steps:
+      - name: Checkout exact Fleet RC1 patch source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 573689e53a7fc0ab6c90e7901c3fd58d596c2376
+          persist-credentials: false
+
+      - name: Verify app source and prepare disposable checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_FLEET_SHA"
+          test -s patches/navigator-app-no-credential-logs.patch
+          test "$(grep -c '^From [a-f0-9]\{40\} ' patches/navigator-app-no-credential-logs.patch)" -eq 2
+          mkdir navigator-app
+          git -C navigator-app init --quiet
+          git -C navigator-app remote add origin https://github.com/fleetbase/navigator-app.git
+          git -C navigator-app fetch --quiet --depth 1 origin "$EXPECTED_NAVIGATOR_SHA"
+          git -C navigator-app checkout --quiet --detach FETCH_HEAD
+          test "$(git -C navigator-app rev-parse HEAD)" = "$EXPECTED_NAVIGATOR_SHA"
+          git -C navigator-app -c user.name='GST QA Security' -c user.email='qa-noreply@localhost' am --3way ../patches/navigator-app-no-credential-logs.patch
+          test "$(git -C navigator-app rev-list --count "$EXPECTED_NAVIGATOR_SHA"..HEAD)" -eq 2
+          git -C navigator-app diff --check "$EXPECTED_NAVIGATOR_SHA"..HEAD
+          echo 'S98_R15_NAVIGATOR_TWO_SECURITY_PATCHES=PASS'
+
+      - name: Set up Node.js and Yarn
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24.22.2'
+
+      - name: Enable pinned Yarn
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare yarn@3.6.4 --activate
+          node --version
+          yarn --version
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: platform-tools
+
+      - name: Install only necessary SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.1.12297006"
+          echo 'S98_R15_ANDROID_API36_SDK=PASS'
+
+      - name: Configure nonproduction QA-only Android app
+        shell: bash
+        working-directory: navigator-app
+        run: |
+          set -euo pipefail
+          cat > .env <<'EOF'
+          APP_NAME=Navigator RC1 QA
+          APP_IDENTIFIER=io.fleetbase.navigator.qa
+          APP_LINK_PREFIX=flbnavigator
+          FLEETBASE_HOST=https://qa.invalid
+          FLEETBASE_KEY=
+          GOOGLE_MAPS_API_KEY=
+          ANDROID_VERSION_CODE=1
+          ANDROID_VERSION_NAME=rc1-qa
+          TRANSISTORSOFT_LICENSE_KEY_ANDROID=
+          EOF
+          # A synthetic Firebase Android config enables compilation only.
+          # This APK cannot perform real FCM tests, and must never be released.
+          cat > android/app/google-services.json <<'EOF'
+          {
+            "project_info": {
+              "project_number": "123456789012",
+              "project_id": "gst-navigator-synthetic-qa",
+              "storage_bucket": "gst-navigator-synthetic-qa.appspot.com"
+            },
+            "client": [{
+              "client_info": {
+                "mobilesdk_app_id": "1:123456789012:android:0123456789abcdef",
+                "android_client_info": {
+                  "package_name": "io.fleetbase.navigator.qa"
+                }
+              },
+              "oauth_client": [],
+              "api_key": [{
+                "current_key": "not-a-real-firebase-api-key"
+              }],
+              "services": {
+                "appinvite_service": {
+                  "other_platform_oauth_client": []
+                }
+              }
+            }],
+            "configuration_version": "1"
+          }
+          EOF
+          echo "NODE_BINARY=$(command -v node)" >> "$GITHUB_ENV"
+          echo 'S98_R15_QA_ONLY_PLACEHOLDER_CONFIG=PASS'
+
+      - name: Install React Native dependencies from lockfile
+        shell: bash
+        working-directory: navigator-app
+        run: |
+          set -euo pipefail
+          yarn install --immutable
+          echo 'S98_R15_NAVIGATOR_YARN_LOCK=PASS'
+
+      - name: Execute pinned mobile tests
+        shell: bash
+        working-directory: navigator-app
+        run: |
+          set -euo pipefail
+          yarn test --ci --runInBand --no-watchman
+          echo 'S98_R15_NAVIGATOR_JEST=PASS'
+
+      - name: Build ARM64 debug APK only
+        shell: bash
+        working-directory: navigator-app/android
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          ./gradlew assembleDebug --no-daemon --max-workers=2 -PreactNativeArchitectures=arm64-v8a
+          echo 'S98_R15_NAVIGATOR_ARM64_DEBUG_BUILD=PASS'
+
+      - name: Verify debug package identity and APK integrity
+        shell: bash
+        working-directory: navigator-app
+        run: |
+          set -euo pipefail
+          apk=android/app/build/outputs/apk/debug/app-debug.apk
+          test -s "$apk"
+          unzip -tqq "$apk"
+          aapt="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          if test -x "$aapt"; then
+            "$aapt" dump badging "$apk" | grep -q "package: name='io.fleetbase.navigator.qa'"
+            "$aapt" dump badging "$apk" | grep -q "targetSdkVersion:'36'"
+            echo 'S98_R15_QA_PACKAGE_AND_TARGET_API=PASS'
+          else
+            echo '::warning::aapt unavailable; package identity requires device-side verification'
+          fi
+          sha256sum "$apk"
+          echo 'S98_R15_APK_ZIP_INTEGRITY=PASS'
+
+      - name: Upload short-lived QA debug APK
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: gst-rc1-navigator-android16-arm64-debug-573689e
+          path: navigator-app/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
+
+      - name: Nonproduction marker
+        run: |
+          echo 'S98_R15_MOBILE_QA_DEBUG_ARTIFACT_ONLY=PASS'
+          echo 'S98_R15_REAL_FIREBASE_FCM=NOT_TESTED'
+          echo 'S98_R15_LIVE_QA_PAIRING=NOT_TESTED'
+          echo 'S98_R15_PRODUCTION_DEPLOY=NO'
