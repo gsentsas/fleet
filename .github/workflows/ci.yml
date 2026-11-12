@@ -76,6 +76,28 @@ jobs:
           git -C navigator-app diff --check "$EXPECTED_NAVIGATOR_SHA"..HEAD
           echo 'S98_R15_NAVIGATOR_TWO_SECURITY_PATCHES=PASS'
 
+      - name: Checkout pinned QA-only config guard patch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 4b195cc824031ddd0384542e5e50a84989d5953d
+          path: qa-source
+          persist-credentials: false
+
+      - name: Apply QA-only SDK initialization guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch=qa-source/patches/navigator-app-qa-config-guard.patch
+          test -s "$patch"
+          echo "466e27b6ad0588ded17158d3e010977995e3990565deccfc69352e523da7d352  $patch" | sha256sum -c -
+          test "$(git -C qa-source rev-parse HEAD)" = 4b195cc824031ddd0384542e5e50a84989d5953d
+          git -C navigator-app apply --check "../$patch"
+          git -C navigator-app apply "../$patch"
+          git -C navigator-app diff --check
+          grep -Fq 'useState<Fleetbase | null>(null)' navigator-app/src/hooks/use-fleetbase.ts
+          grep -Fq "Configure Fleetbase Instance" navigator-app/src/screens/SetupWarningScreen.tsx
+          echo 'S98_R16_MOBILE_MISSING_CONFIG_GUARD_APPLIED=PASS'
+
       - name: Set up Node.js and Yarn
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
