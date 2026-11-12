@@ -1,0 +1,135 @@
+diff --git a/src/hooks/use-fleetbase.ts b/src/hooks/use-fleetbase.ts
+index ba716bb..602f670 100644
+--- a/src/hooks/use-fleetbase.ts
++++ b/src/hooks/use-fleetbase.ts
+@@ -10,13 +10,13 @@ const useFleetbase = () => {
+ 
+     const [error, setError] = useState<Error | null>(null);
+     const [authToken] = useStorage('_driver_token');
+-    const [fleetbase, setFleetbase] = useState<Fleetbase | null>(new Fleetbase(authToken ?? FLEETBASE_KEY, { host: FLEETBASE_HOST }));
++    const [fleetbase, setFleetbase] = useState<Fleetbase | null>(null);
+ 
+     const hasFleetbaseConfig = useCallback(() => {
+         const FLEETBASE_KEY = resolveConnectionConfig('FLEETBASE_KEY');
+         const FLEETBASE_HOST = resolveConnectionConfig('FLEETBASE_HOST');
+ 
+-        return typeof FLEETBASE_KEY === 'string' && typeof FLEETBASE_HOST === 'string';
++        return typeof FLEETBASE_KEY === 'string' && FLEETBASE_KEY.trim().length > 0 && typeof FLEETBASE_HOST === 'string' && FLEETBASE_HOST.trim().length > 0;
+     }, [resolveConnectionConfig]);
+ 
+     useEffect(() => {
+@@ -24,12 +24,22 @@ const useFleetbase = () => {
+         const FLEETBASE_KEY = resolveConnectionConfig('FLEETBASE_KEY');
+ 
+         try {
+-            // If authToken is present, initialize a new Fleetbase instance with it,
+-            // otherwise fall back to the default configuration.
+-            const fleetbase = authToken ? new Fleetbase(authToken, { host: FLEETBASE_HOST }) : new Fleetbase(FLEETBASE_KEY, { host: FLEETBASE_HOST });
+-            setFleetbase(fleetbase);
+-        } catch (initializationError) {
+-            setError(initializationError as Error);
++            // A new QA installation may not have an instance key until pairing.
++            // Never construct Fleetbase with an absent key during React render.
++            const key = authToken || FLEETBASE_KEY;
++            if (typeof key !== 'string' || key.trim().length === 0 || typeof FLEETBASE_HOST !== 'string' || FLEETBASE_HOST.trim().length === 0) {
++                setFleetbase(null);
++                setError(null);
++                return;
++            }
++
++            const client = new Fleetbase(key, { host: FLEETBASE_HOST });
++            setFleetbase(client);
++            setError(null);
++        } catch (_initializationError) {
++            // Do not leak API keys or bearer tokens in errors.
++            setFleetbase(null);
++            setError(new Error('Fleetbase instance configuration is invalid.'));
+         }
+     }, [authToken, resolveConnectionConfig]);
+ 
+diff --git a/src/screens/BootScreen.tsx b/src/screens/BootScreen.tsx
+index 346315c..da4033f 100644
+--- a/src/screens/BootScreen.tsx
++++ b/src/screens/BootScreen.tsx
+@@ -59,8 +59,16 @@ const BootScreen = () => {
+                 }
+             };
+ 
+-            checkLocationPermission();
+-        }, [navigation, isAuthenticated])
++            // Configuration comes first; do not request location permission
++            // when no valid Fleetbase instance has been configured.
++            if (!hasFleetbaseConfig()) {
++                later(() => BootSplash.hide(), 300);
++                setError(new Error(t('BootScreen.missingRequiredConfigurationKeys')));
++            } else {
++                setError(null);
++                checkLocationPermission();
++            }
++        }, [navigation, isAuthenticated, hasFleetbaseConfig, t])
+     );
+ 
+     if (error) {
+diff --git a/src/screens/SetupWarningScreen.tsx b/src/screens/SetupWarningScreen.tsx
+index 246e855..02a7654 100644
+--- a/src/screens/SetupWarningScreen.tsx
++++ b/src/screens/SetupWarningScreen.tsx
+@@ -1,17 +1,17 @@
+ import React from 'react';
+-import Config from 'react-native-config';
+ import { SafeAreaView } from 'react-native';
+ import { FontAwesomeIcon } from '@fortawesome/react-native-fontawesome';
+ import { faExclamationTriangle, faExclamation } from '@fortawesome/free-solid-svg-icons';
+-import { translate } from '../utils/localize';
+-import { Stack, YStack, XStack, Text, useTheme } from 'tamagui';
++import { Stack, YStack, XStack, Text, Button, useTheme } from 'tamagui';
++import { useNavigation } from '@react-navigation/native';
++import { useConfig } from '../contexts/ConfigContext';
+ import { useLanguage } from '../contexts/LanguageContext';
+ 
+-const keyMissing = (key: string) => !Config[key];
+-
+ const SetupWarningScreen = ({ error }: { error?: Error }) => {
+     const { t } = useLanguage();
+     const theme = useTheme();
++    const navigation = useNavigation();
++    const { resolveConnectionConfig } = useConfig();
+ 
+     return (
+         <SafeAreaView style={{ flex: 1, backgroundColor: 'white' }}>
+@@ -29,7 +29,7 @@ const SetupWarningScreen = ({ error }: { error?: Error }) => {
+                 </Stack>
+ 
+                 <YStack width='100%'>
+-                    {keyMissing('FLEETBASE_KEY') && (
++                    {!resolveConnectionConfig('FLEETBASE_KEY') && (
+                         <XStack alignItems='center' bg='$red1' borderRadius='$2' px='$3' py='$2' mb='$2'>
+                             <FontAwesomeIcon icon={faExclamation} size={12} color='#7F1D1D' style={{ marginRight: 8 }} />
+                             <Text color='$red900' fontWeight='bold'>
+@@ -40,14 +40,11 @@ const SetupWarningScreen = ({ error }: { error?: Error }) => {
+                             </Text>
+                         </XStack>
+                     )}
+-                    {keyMissing('STOREFRONT_KEY') && (
++                    {!resolveConnectionConfig('FLEETBASE_HOST') && (
+                         <XStack alignItems='center' bg='$red1' borderRadius='$2' px='$3' py='$2'>
+                             <FontAwesomeIcon icon={faExclamation} size={12} color='#7F1D1D' style={{ marginRight: 8 }} />
+                             <Text color='$red900' fontWeight='bold'>
+-                                {t('common.storefront')} {t('common.apiKey')}
+-                            </Text>
+-                            <Text color='$red900' fontWeight='500' ml='$1'>
+-                                {t('SetupWarningScreen.envMissing')}
++                                Fleetbase host not configured
+                             </Text>
+                         </XStack>
+                     )}
+@@ -58,6 +55,9 @@ const SetupWarningScreen = ({ error }: { error?: Error }) => {
+                             </Text>
+                         </XStack>
+                     )}
++                    <Button mt='$4' size='$5' bg='$blue-600' onPress={() => navigation.navigate('InstanceLink')}>
++                        <Button.Text color='white'>Configure Fleetbase Instance</Button.Text>
++                    </Button>
+                 </YStack>
+             </YStack>
+         </SafeAreaView>
