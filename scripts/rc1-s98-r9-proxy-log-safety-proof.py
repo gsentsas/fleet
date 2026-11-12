@@ -49,5 +49,26 @@ a = upstream.search(sensitive.group(1))
 b = upstream.search(default.group(1))
 assert a and b and a.group(1).strip() == b.group(1).strip(), "HTTPD: pairing route changes upstream"
 assert "proxy_set_header Host" in sensitive.group(1), "HTTPD: pairing route missing Host forwarding"
+# Both the token redemption and token issuance endpoints carry bearer URLs.
+# Avoid browser/proxy storage and referrer propagation even on non-2xx responses.
+for route in ("link-app", "get-link-app"):
+    location = re.search(
+        rf"(?ms)^  location\\s*=\\s*/int/v1/fleet-ops/navigator/{route}\\s*\\{{\\n(.*?)^  \\}}",
+        httpd,
+    )
+    assert location is not None, f"HTTPD: {route} exact location absent"
+    body = location.group(1)
+    for directive in (
+        'proxy_hide_header Cache-Control;',
+        'add_header Cache-Control "no-store" always;',
+        'add_header Referrer-Policy "no-referrer" always;',
+        'error_log /dev/null crit;',
+    ):
+        assert directive in body, f"HTTPD: {route} missing protection: {directive}"
+    assert "proxy_set_header Host" in body, f"HTTPD: {route} missing upstream Host"
+    proxied = upstream.search(body)
+    assert proxied and proxied.group(1).strip() == b.group(1).strip(), f"HTTPD: {route} changes upstream"
+print("S98_R45_NAVIGATOR_RESPONSE_PRIVACY_GUARD=PASS")
+
 print("S98_R9_PAIRING_PROXY_ERROR_LOG_GUARD=PASS")
 print("S98_R9_PLESK_FRONT_DOOR_LOG_PRIVACY=NOT_YET_VALIDATED")
