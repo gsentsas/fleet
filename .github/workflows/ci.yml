@@ -182,6 +182,21 @@ jobs:
           yarn test --ci --runInBand --no-watchman
           echo 'S98_R15_NAVIGATOR_JEST=PASS'
 
+      - name: Rebuild patched React Native JavaScript bundle for debug APK
+        shell: bash
+        working-directory: navigator-app
+        run: |
+          set -euo pipefail
+          # Upstream commits a pre-built JS bundle; assembleDebug does not regenerate it.
+          # Delete the stale upstream bundle and explicitly package the patched sources.
+          rm -f android/app/src/main/assets/index.android.bundle
+          mkdir -p android/app/src/main/assets
+          yarn react-native bundle --platform android --dev true --entry-file index.js --bundle-output android/app/src/main/assets/index.android.bundle --assets-dest android/app/src/main/res
+          test -s android/app/src/main/assets/index.android.bundle
+          grep -aFq 'Configure Fleetbase Instance' android/app/src/main/assets/index.android.bundle
+          grep -aFq 'Fleetbase instance configuration is invalid.' android/app/src/main/assets/index.android.bundle
+          echo 'S98_R19_PATCHED_JS_BUNDLE_EMBEDDED=PASS'
+
       - name: Build ARM64 debug APK only
         shell: bash
         working-directory: navigator-app/android
