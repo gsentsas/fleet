@@ -41,7 +41,7 @@ jobs:
           ./docker-bake.hcl
 
   android_navigator_qa:
-    name: RC1 Navigator Android ARM64 debug APK (synthetic FCM, no deploy)
+    name: RC1 Navigator Android ARM64 debug APK (gsent-it FCM client, no deploy)
     if: github.event_name == 'workflow_dispatch' && github.ref_name == 'test/rc1-s98-r15-android-device-qa'
     runs-on: ubuntu-24.04
     timeout-minutes: 55
@@ -146,37 +146,25 @@ jobs:
           ANDROID_VERSION_NAME=rc1-qa
           TRANSISTORSOFT_LICENSE_KEY_ANDROID=
           EOF
-          # A synthetic Firebase Android config enables compilation only.
-          # This APK cannot perform real FCM tests, and must never be released.
-          cat > android/app/google-services.json <<'EOF'
-          {
-            "project_info": {
-              "project_number": "123456789012",
-              "project_id": "gst-navigator-synthetic-qa",
-              "storage_bucket": "gst-navigator-synthetic-qa.appspot.com"
-            },
-            "client": [{
-              "client_info": {
-                "mobilesdk_app_id": "1:123456789012:android:0123456789abcdef",
-                "android_client_info": {
-                  "package_name": "io.fleetbase.navigator.qa"
-                }
-              },
-              "oauth_client": [],
-              "api_key": [{
-                "current_key": "not-a-real-firebase-api-key"
-              }],
-              "services": {
-                "appinvite_service": {
-                  "other_platform_oauth_client": []
-                }
-              }
-            }],
-            "configuration_version": "1"
-          }
-          EOF
+          # Inject only Firebase Android client config from GitHub Actions secrets.
+          # The Admin SDK service-account JSON must never be used in a mobile build.
+          test -n "${FIREBASE_ANDROID_JSON:-}"
+          umask 077
+          printf '%s' "$FIREBASE_ANDROID_JSON" > android/app/google-services.json
+          python3 - <<'PYVALIDATE'
+          import json
+          from pathlib import Path
+          data=json.loads(Path("android/app/google-services.json").read_text())
+          assert data["project_info"]["project_id"] == "gsent-it"
+          assert any(c["client_info"]["android_client_info"]["package_name"] == "io.fleetbase.navigator.qa" for c in data["client"])
+          assert "private_key" not in data
+          print("GST_FIREBASE_ANDROID_CLIENT_CONFIG=PASS")
+          PYVALIDATE
+          unset FIREBASE_ANDROID_JSON
           echo "NODE_BINARY=$(command -v node)" >> "$GITHUB_ENV"
-          echo 'S98_R15_QA_ONLY_PLACEHOLDER_CONFIG=PASS'
+          echo 'S98_R18_GSENT_FIREBASE_ANDROID_CLIENT=PASS'
+        env:
+          FIREBASE_ANDROID_JSON: ${{ secrets.GST_NAVIGATOR_QA_GOOGLE_SERVICES_JSON }}
 
       - name: Install React Native dependencies from lockfile
         shell: bash
