@@ -26,12 +26,12 @@ for name, path in PATHS.items():
 httpd = PATHS["HTTPD"].read_text(encoding="utf-8")
 # The server-level error_log must not persist request lines. A location-only
 # override cannot protect other routes during upstream 502 failures.
-server_prefix = re.search(r"(?ms)^server\\s*\\{(.*?)(?=^  location\\s)", httpd)
+server_prefix = re.search(r"(?ms)^server\s*\{(.*?)(?=^  location\s)", httpd)
 assert server_prefix is not None, "HTTPD: server block missing"
-assert re.search(r"(?m)^  error_log\\s+/dev/null\\s+crit\\s*;", server_prefix.group(1)), (
+assert re.search(r"(?m)^  error_log\s+/dev/null\s+crit\s*;", server_prefix.group(1)), (
     "HTTPD: server error-log may persist query-bearing URLs"
 )
-assert not re.search(r"(?m)^  error_log\\s+(?!/dev/null\\s+crit\\s*;)[^;]+;", server_prefix.group(1)), (
+assert not re.search(r"(?m)^  error_log\s+(?!/dev/null\s+crit\s*;)[^;]+;", server_prefix.group(1)), (
     "HTTPD: unsafe server error-log override"
 )
 print("S98_R42_HTTPD_SERVER_ERROR_LOG_GUARD=PASS")
