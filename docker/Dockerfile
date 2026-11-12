@@ -78,7 +78,8 @@ ENV PNPM_HOME=/root/.pnpm
 ENV PATH=/root/.pnpm/bin:$PATH
 
 # Set some build ENV variables
-ENV LOG_CHANNEL=stdout
+# Octane's FrankenPHP supervisor forwards child stderr, not child stdout.
+ENV LOG_CHANNEL=stderr
 ENV CACHE_DRIVER=null
 ENV BROADCAST_DRIVER=socketcluster
 ENV QUEUE_CONNECTION=redis
