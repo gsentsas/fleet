@@ -1,6 +1,6 @@
 <?php
 
-use Monolog\Formatter\JsonFormatter;
+use App\Logging\FrankenPhpJsonFormatter;
 use Monolog\Handler\NullHandler;
 use Monolog\Handler\StreamHandler;
 use Monolog\Handler\SyslogUdpHandler;
@@ -90,7 +90,7 @@ return [
             'driver' => 'monolog',
             'level' => env('LOG_LEVEL', 'debug'),
             'handler' => StreamHandler::class,
-            'formatter' => JsonFormatter::class,
+            'formatter' => FrankenPhpJsonFormatter::class,
             'with' => [
                 'stream' => 'php://stderr',
             ],
@@ -99,7 +99,7 @@ return [
         'stdout' => [
             'driver' => 'monolog',
             'handler' => StreamHandler::class,
-            'formatter' => JsonFormatter::class,
+            'formatter' => FrankenPhpJsonFormatter::class,
             'with' => [
                 'stream' => 'php://stdout',
             ],

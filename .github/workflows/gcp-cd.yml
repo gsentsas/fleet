@@ -29,23 +29,25 @@ jobs:
 
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v3
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         submodules: recursive
 
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v2
+      uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
     - name: Set Dynamic ENV Vars
       run: |
-          SHORT_COMMIT=$(echo $GITHUB_SHA | cut -c -8)
-          echo "VERSION=${SHORT_COMMIT}" >> $GITHUB_ENV
-          echo "STACK=$(basename $GITHUB_REF)" >> $GITHUB_ENV
-          echo "REGISTRY_HOST=$(dirname $(dirname $REGISTRY))" >> $GITHUB_ENV
+          SHORT_COMMIT=$(echo "$GITHUB_SHA" | cut -c -8)
+          {
+            echo "VERSION=${SHORT_COMMIT}"
+            echo "STACK=$(basename "$GITHUB_REF")"
+            echo "REGISTRY_HOST=$(dirname "$(dirname "$REGISTRY")")"
+          } >> "$GITHUB_ENV"
 
     - id: 'auth'
       name: 'Authenticate to Google Cloud'
-      uses: 'google-github-actions/auth@v1'
+      uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
       with:
         token_format: "access_token"
         create_credentials_file: true
@@ -53,7 +55,7 @@ jobs:
         service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
 
     - name: 'Set up Cloud SDK'
-      uses: 'google-github-actions/setup-gcloud@v1'
+      uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
 
     - id: 'get-credentials'
       uses: 'google-github-actions/get-gke-credentials@v1'
@@ -67,14 +69,6 @@ jobs:
         username: 'oauth2accesstoken'
         password: '${{ steps.auth.outputs.access_token }}'
 
-    - name: Prepare Composer Auth Secret
-      run: |
-        if [[ -n "${{ secrets._GITHUB_AUTH_TOKEN }}" ]]; then
-          echo '{"github-oauth": {"github.com": "'${{ secrets._GITHUB_AUTH_TOKEN }}'"}}' > composer-auth.json
-        else
-          echo '{}' > composer-auth.json
-        fi
-
     - name: nullify ssm-parent config
       run: |
         # this is needed to disable ssm-parent, which is used on AWS
@@ -82,7 +76,8 @@ jobs:
 
     - name: Build and Release
       uses: docker/bake-action@v2
-      env: 
+      env:
+        COMPOSER_AUTH: '{"github-oauth":{"github.com":"${{ secrets._GITHUB_AUTH_TOKEN || github.token }}"}}'
         REGISTRY: ${{ env.REGISTRY }}
         VERSION: ${{ env.VERSION }}
         CACHE: type=gha
@@ -105,19 +100,19 @@ jobs:
 
     steps:
     - name: Checkout
-      uses: actions/checkout@v3
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         submodules: true
 
     - name: Set Dynamic ENV Vars
       run: |
-          SHORT_COMMIT=$(echo $GITHUB_SHA | cut -c -8)
-          echo "VERSION=${SHORT_COMMIT}" >> $GITHUB_ENV
-          echo "STACK=$(basename $GITHUB_REF)" >> $GITHUB_ENV
+          SHORT_COMMIT=$(echo "$GITHUB_SHA" | cut -c -8)
+          echo "VERSION=${SHORT_COMMIT}" >> "$GITHUB_ENV"
+          echo "STACK=$(basename "$GITHUB_REF")" >> "$GITHUB_ENV"
 
     - id: 'auth'
       name: 'Authenticate to Google Cloud'
-      uses: 'google-github-actions/auth@v1'
+      uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
       with:
         token_format: "access_token"
         create_credentials_file: true
@@ -125,10 +120,10 @@ jobs:
         service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
 
     - name: 'Set up Cloud SDK'
-      uses: 'google-github-actions/setup-gcloud@v1'
+      uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
 
     - name: Install Node.js
-      uses: actions/setup-node@v3
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
       with:
         node-version: 22
 
@@ -143,9 +138,9 @@ jobs:
       id: pnpm-cache
       shell: bash
       run: |
-        echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
+        echo "STORE_PATH=$(pnpm store path)" >> "$GITHUB_OUTPUT"
 
-    - uses: actions/cache@v3
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       name: Setup pnpm Cache
       with:
         path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}

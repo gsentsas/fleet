@@ -39,3 +39,6 @@ builds/osx/frankenphp
 *.dll
 *.so
 *.dylib
+
+# Isolated S92 test-tool dependencies
+/tools/pest/vendor/

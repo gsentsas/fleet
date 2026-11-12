@@ -1,0 +1,85 @@
+{
+  "server_sources": {
+    "core-api": "4235a8661e1b08ff448db86d0eaedb76e3162739",
+    "fleetops": "7f5a82f2d4be87f52bd5729e39384867af21345a",
+    "storefront": "b6d596154370ed5770225d889363a74fab56e584"
+  },
+  "composer_lock_sha256": "77e93ea7273e80891a8c165cd6d4b56ef7a8615dab2b0b9152875aac290de5c5",
+  "runtime": {
+    "php": "8.2.35",
+    "laravel": "12.71.0",
+    "phpunit": "11.5.57",
+    "mysql": "8.0.46"
+  },
+  "tests": {
+    "navigator_mysql": {
+      "status": "executed_success",
+      "tests": 25,
+      "assertions": 221,
+      "evidence_log_sha256": "5f4e2c85879236a508c12954a9fed395aa129bbeb388c83b693cf09d15a2a04d"
+    },
+    "application_unit": {
+      "status": "executed_success",
+      "tests": 47,
+      "assertions": 136,
+      "evidence_log_sha256": "ee4f87985ad1fd008ebc517ec3478c5b5636d6a9dcb4da0230f099047c246fd3"
+    },
+    "application_feature": {
+      "status": "executed_success",
+      "tests": 18,
+      "assertions": 58,
+      "evidence_log_sha256": "130c9dbbc45a5217459bc986f8613c577e302bc346c969d68fbf1621e2e143af"
+    },
+    "legacy_mysql_http": {
+      "status": "executed_success",
+      "tests": 1,
+      "assertions": 17,
+      "evidence_log_sha256": "1ba7accf2c08103202f6cc2d999ca3d910e90c7b1512c18f22fb68aca0d33e99"
+    },
+    "legacy_mysql_quote": {
+      "status": "executed_success",
+      "tests": 4,
+      "assertions": 56,
+      "evidence_log_sha256": "ae155f5078304f5831df2a98f7e55b4c65ae87155a79b7b7dee7198b2428ddec"
+    },
+    "package_contracts": {
+      "status": "executed_success",
+      "tests": 7,
+      "assertions": 34,
+      "evidence_log_sha256": "f91fa228e5855c796b96dc7c499a4ecdb1e36d2f37c98ba4eb37fa7247373b0a"
+    },
+    "package_helpers": {
+      "status": "executed_success",
+      "tests": 10,
+      "assertions": 45,
+      "evidence_log_sha256": "6016a7ee619fc9d574913f4cee79fd5e53c7202fbf8639f19a7ed8f61a8ee1f1"
+    }
+  },
+  "mysql": {
+    "migration_records": 397,
+    "main_schema_tables": 154,
+    "fresh_install": "executed_success",
+    "empty_navigator_rollback_and_reapply": "executed_success",
+    "repeat_migrate": "nothing_to_migrate"
+  },
+  "actionlint_nine_modified_workflows": "executed_success_with_available_shellcheck",
+  "gitleaks": {
+    "version": "8.30.1",
+    "core_findings": 0,
+    "fleetops_findings": 0,
+    "fleet_findings": 3,
+    "fleet_exit": 1,
+    "triage": "three_public_commit_references_in_exact_pin_assertion",
+    "untriaged_findings": 0
+  },
+  "synthetic_build_secret_proof": "executed_success",
+  "mobile_patch_application": "executed_success",
+  "mobile_runtime_build": "not_run",
+  "mobile_qa_device": "not_available",
+  "firebase_real_delivery": "not_run",
+  "production_runtime_image_build": "not_run",
+  "exact_candidate_ci": "pending",
+  "qa_deployment": "not_run",
+  "production_deployment": "not_run",
+  "release_decision": "NO_GO"
+}

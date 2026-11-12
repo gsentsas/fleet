@@ -1,0 +1,2 @@
+FROM gst-r13-a15r-php8235-bcmath-s12f:local
+RUN docker-php-ext-install -j2 pdo_mysql pcntl

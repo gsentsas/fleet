@@ -1,0 +1,165 @@
+name: GST RC1 locked FleetOps security integration
+on:
+  pull_request:
+    branches: [release/rc1-security-core-e2076d39-20261110]
+    paths:
+      - '.github/workflows/gst-rc1-fleetops-security-integration.yml'
+      - 'scripts/rc1-fleetops-locked-overlay-proof.sh'
+      - 'api/composer.json'
+      - 'api/composer.lock'
+      - 'docker/Dockerfile'
+      - 'docker/httpd/vhost.conf'
+      - 'console/nginx.conf'
+      - 'scripts/rc1-s98-r9-proxy-log-safety-proof.py'
+      - '.dockerignore'
+      - 'scripts/rc1-qa-isolated-recovery-preflight.sh'
+      - 'api/tests/Feature/Rc1MySqlQuoteTenantBoundaryTest.php'
+      - 'api/tests/Feature/Rc1FullSchemaHttpTenantTest.php'
+      - 'api/tests/Feature/Rc1*.php'
+      - 'api/tests/Unit/Rc1Firebase*.php'
+      - 'api/tests/Unit/Rc1OctaneLoggingTest.php'
+      - 'api/app/Exceptions/Handler.php'
+      - 'api/app/Logging/FrankenPhpJsonFormatter.php'
+      - 'api/config/logging.php'
+      - 'scripts/rc1-firebase-qa-secret-preflight.sh'
+      - 'scripts/rc1-firebase-qa-preflight-contract-test.py'
+      - 'scripts/rc1-firebase-sdk-config-contract.php'
+      - 'deploy/compose.firebase.qa.yml'
+      - 'docs/rc1-firebase-gsent-it-qa-s37.md'
+permissions:
+  contents: read
+jobs:
+  locked-fleetops-overlay:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      redis:
+        image: redis@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f
+        ports:
+          - 6379:6379
+      mysql:
+        image: mysql@sha256:7dcddc01f13bab2f15cde676d44d01f61fc9f99fe7785e86196dfc07d358ae2b
+        env:
+          MYSQL_ROOT_PASSWORD: rc1_ci_ephemeral_only
+          MYSQL_DATABASE: rc1_ci_tenant
+          MYSQL_USER: rc1_ci
+          MYSQL_PASSWORD: rc1_ci_ephemeral_only
+        ports:
+          - 3306:3306
+    env:
+      COMPOSER_NO_INTERACTION: '1'
+      COMPOSER_PROCESS_TIMEOUT: '600'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Queryless Nginx access logging source gate
+        run: python3 scripts/rc1-s98-r9-proxy-log-safety-proof.py
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # verified v2
+        with:
+          php-version: '8.2.35'
+          extensions: mbstring, xml, gd, zip, pcntl, pdo_mysql, pdo_sqlite, sqlite3, intl, bcmath, gmp
+          coverage: none
+      - name: Synthetic Firebase QA preflight contract (no secrets, no Docker)
+        run: python3 scripts/rc1-firebase-qa-preflight-contract-test.py
+      - name: Configure read-only Composer metadata access
+        working-directory: api
+        env:
+          GH_JOB_TOKEN: ${{ github.token }}
+        run: composer config --global github-oauth.github.com "$GH_JOB_TOKEN"
+      - name: Exact committed lock plus pinned FleetOps security overlay
+        run: bash scripts/rc1-fleetops-locked-overlay-proof.sh
+      - name: Firebase SDK QA configuration resolution (no credentials)
+        working-directory: api
+        env:
+          GOOGLE_CLOUD_PROJECT: gsent-it
+          FIREBASE_CREDENTIALS: /run/secrets/gst-firebase-qa.json
+          GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/gst-firebase-qa.json
+        run: php ../scripts/rc1-firebase-sdk-config-contract.php
+      - name: Real FleetOps service-quote tenant isolation on disposable MySQL
+        working-directory: api
+        env:
+          RC1_EPHEMERAL_MYSQL: '1'
+          APP_ENV: testing
+          APP_URL: http://localhost.test
+          DB_CONNECTION: mysql
+          DB_HOST: 127.0.0.1
+          DB_PORT: '3306'
+          DB_DATABASE: rc1_ci_tenant
+          DB_USERNAME: rc1_ci
+          DB_PASSWORD: rc1_ci_ephemeral_only
+          CACHE_STORE: array
+          CACHE_DRIVER: array
+          MAIL_MAILER: array
+          QUEUE_CONNECTION: sync
+          SESSION_DRIVER: array
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: '6379'
+          LOG_CHANNEL: stderr
+          TELESCOPE_ENABLED: 'false'
+        run: |
+          set -euo pipefail
+          APP_KEY="$(php -r 'echo "base64:".base64_encode(random_bytes(32));')"
+          export APP_KEY
+          php ../scripts/rc1-ci-mysql-ready.php
+          vendor/bin/phpunit -c phpunit.xml --colors=never tests/Feature/Rc1MySqlQuoteTenantBoundaryTest.php
+          echo RC1_REAL_MYSQL_SERVICE_QUOTE_TENANT=PASS
+      - name: Real API PHPUnit Unit and Feature after patched FleetOps overlay
+        working-directory: api
+        env:
+          APP_ENV: testing
+          APP_URL: http://localhost.test
+          DB_CONNECTION: sqlite
+          DB_DATABASE: ':memory:'
+          CACHE_STORE: array
+          CACHE_DRIVER: array
+          MAIL_MAILER: array
+          QUEUE_CONNECTION: sync
+          SESSION_DRIVER: array
+          LOG_CHANNEL: stderr
+          TELESCOPE_ENABLED: 'false'
+        run: |
+          set -euo pipefail
+          APP_KEY="$(php -r 'echo "base64:".base64_encode(random_bytes(32));')"
+          export APP_KEY
+          test "$(sha256sum composer.lock | cut -d ' ' -f1)" = '77e93ea7273e80891a8c165cd6d4b56ef7a8615dab2b0b9152875aac290de5c5'
+          vendor/bin/phpunit -c phpunit.xml --testsuite Unit --colors=never
+          echo RC1_PATCHED_API_PHPUNIT_UNIT=PASS
+          vendor/bin/phpunit -c phpunit.xml --testsuite Feature --exclude-group rc1-mysql-only --colors=never --display-phpunit-deprecations
+          echo RC1_PATCHED_API_PHPUNIT_FEATURE=PASS
+
+      - name: S48 isolated MySQL complete migration replay (fail closed)
+        working-directory: api
+        env:
+          APP_ENV: testing
+          APP_URL: http://localhost.test
+          DB_CONNECTION: mysql
+          DB_HOST: 127.0.0.1
+          DB_PORT: '3306'
+          DB_DATABASE: rc1_ci_schema
+          DB_USERNAME: root
+          DB_PASSWORD: rc1_ci_ephemeral_only
+          CACHE_DRIVER: array
+          CACHE_STORE: array
+          SESSION_DRIVER: array
+          QUEUE_CONNECTION: sync
+          MAIL_MAILER: array
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: '6379'
+          TELESCOPE_ENABLED: 'false'
+        run: |
+          set -euo pipefail
+          test "${{ github.event_name }}" = "pull_request"
+          test "$DB_DATABASE" = "rc1_ci_schema"
+          test "$APP_ENV" = "testing"
+          APP_KEY="$(php -r 'echo "base64:".base64_encode(random_bytes(32));')"
+          export APP_KEY
+          php ../scripts/rc1-ci-create-schemas.php
+          php artisan migrate --force --no-interaction
+          php artisan migrate:status --no-interaction
+          echo S48_FULL_MIGRATION_REPLAY=PASS
+          echo S49_FULL_SCHEMA_HTTP_GATE=START
+          RC1_FULL_SCHEMA_MYSQL=1 vendor/bin/phpunit -c phpunit.xml --colors=never tests/Feature/Rc1FullSchemaHttpTenantTest.php
+          echo S49_FULL_SCHEMA_HTTP_GATE=PASS
+          RC1_NAVIGATOR_MYSQL=1 RESPONSE_CACHE_DRIVER=array vendor/bin/phpunit -c phpunit.xml --colors=never tests/Feature/Rc1NavigatorMySqlTest.php
+          echo S92_REAL_MYSQL_NAVIGATOR_SECURITY=PASS

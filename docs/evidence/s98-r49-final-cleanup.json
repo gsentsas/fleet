@@ -1,0 +1,16 @@
+{
+  "protected_runtime_identical_to_initial": true,
+  "production_running": 8,
+  "qa_running": 4,
+  "owned_containers_remaining": 0,
+  "owned_networks_remaining": 0,
+  "diagnostic_images_removed": true,
+  "production_head": "67b2db64c7490599aaa6c799b26d5e4de897c25c",
+  "production_status": "M .dockerignore\n M console/environments/.env.production\n M console/fleetbase.config.json\n?? docker-compose.smtp.yml",
+  "qa_head": "c806c0798a6793ae2b5f6b1941a373ecb1884517",
+  "qa_status": "",
+  "private_workdir_removed": true,
+  "local_project": "gst-s98-r49-codex",
+  "local_containers_remaining": 0,
+  "local_networks_remaining": 0
+}

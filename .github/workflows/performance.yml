@@ -126,11 +126,13 @@ jobs:
       # comment in install-smoke.yml for why not `app`.
       - name: Build API image from source
         if: steps.auth.outputs.available == 'true'
+        env:
+          COMPOSER_AUTH: '{"github-oauth":{"github.com":"${{ secrets._GITHUB_AUTH_TOKEN || github.token }}"}}'
         run: |
           docker build \
             --file docker/Dockerfile \
             --target app-release \
-            --build-arg GITHUB_AUTH_KEY="${{ secrets._GITHUB_AUTH_TOKEN }}" \
+            --secret id=composer_auth,env=COMPOSER_AUTH \
             --tag fleetbase/fleetbase-api:latest \
             .
 

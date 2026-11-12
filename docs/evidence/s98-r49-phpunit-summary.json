@@ -1,0 +1,42 @@
+{
+  "unit": [
+    "Runtime:       PHP 8.2.35",
+    "Time: 00:02.283, Memory: 81.00 MB",
+    "OK (52 tests, 200 assertions)"
+  ],
+  "feature": [
+    "Runtime:       PHP 8.2.35",
+    "Time: 00:01.088, Memory: 77.00 MB",
+    "OK (18 tests, 58 assertions)"
+  ],
+  "navigator": [
+    "Runtime:       PHP 8.2.35",
+    "Time: 00:02.153, Memory: 81.00 MB",
+    "OK (25 tests, 221 assertions)"
+  ],
+  "full_schema": [
+    "Runtime:       PHP 8.2.35",
+    "Time: 00:00.429, Memory: 71.00 MB",
+    "OK (1 test, 17 assertions)"
+  ],
+  "mysql_state": {
+    "Running": true,
+    "OOMKilled": false,
+    "ExitCode": 0
+  },
+  "mysql_memory": {
+    "memory.current": "588668928",
+    "memory.peak": "592187392",
+    "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+  },
+  "migrations": 397,
+  "first_attempt": {
+    "state": {
+      "Status": "running",
+      "OOMKilled": false,
+      "ExitCode": 0
+    },
+    "memory_limit": 805306368,
+    "outcome": "aborted: tmpfs database reached 768MiB cgroup limit during full migration; no OOM kill; no Navigator result claimed"
+  }
+}

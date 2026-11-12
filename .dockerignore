@@ -32,3 +32,12 @@ api/vendor
 api/frankenphp
 api/storage/app/tmp
 api/storage/logs/*.log
+
+# Secrets and host-generated config must never enter a build context/layer.
+**/.env
+**/.env.*
+**/auth.json
+**/composer-auth.json
+**/.ssh
+api/bootstrap/cache/*.php
+tools/pest/vendor
