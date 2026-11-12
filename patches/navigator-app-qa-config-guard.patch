@@ -48,10 +48,28 @@ index ba716bb..602f670 100644
      }, [authToken, resolveConnectionConfig]);
  
 diff --git a/src/screens/BootScreen.tsx b/src/screens/BootScreen.tsx
-index 346315c..da4033f 100644
+index 346315c..2498984 100644
 --- a/src/screens/BootScreen.tsx
 +++ b/src/screens/BootScreen.tsx
-@@ -59,8 +59,16 @@ const BootScreen = () => {
+@@ -17,6 +17,8 @@ const BootScreen = () => {
+     const { hasFleetbaseConfig } = useFleetbase();
+     const { isAuthenticated } = useAuth();
+     const { t } = useLanguage();
++    // LanguageContext recreates t on each render; depend on stable translated text.
++    const missingConfigurationMessage = t('BootScreen.missingRequiredConfigurationKeys');
+     const [error, setError] = useState<Error | null>(null);
+     const backgroundColor = toArray(config('BOOTSCREEN_BACKGROUND_COLOR', '$background'));
+     const isGradientBackground = isArray(backgroundColor) && backgroundColor.length > 1;
+@@ -36,7 +38,7 @@ const BootScreen = () => {
+ 
+             const initializeNavigator = async () => {
+                 if (!hasFleetbaseConfig()) {
+-                    return setError(new Error(t('BootScreen.missingRequiredConfigurationKeys')));
++                    return setError(new Error(missingConfigurationMessage));
+                 }
+ 
+                 try {
+@@ -59,8 +61,16 @@ const BootScreen = () => {
                  }
              };
  
@@ -61,12 +79,12 @@ index 346315c..da4033f 100644
 +            // when no valid Fleetbase instance has been configured.
 +            if (!hasFleetbaseConfig()) {
 +                later(() => BootSplash.hide(), 300);
-+                setError(new Error(t('BootScreen.missingRequiredConfigurationKeys')));
++                setError(new Error(missingConfigurationMessage));
 +            } else {
 +                setError(null);
 +                checkLocationPermission();
 +            }
-+        }, [navigation, isAuthenticated, hasFleetbaseConfig, t])
++        }, [navigation, isAuthenticated, hasFleetbaseConfig, missingConfigurationMessage])
      );
  
      if (error) {
